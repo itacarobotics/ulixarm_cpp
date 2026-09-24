@@ -1,6 +1,7 @@
-#include "ulixarm.hpp"
+#include "ulixarm_cpp/ulixarm.hpp"
 
 #include <iomanip>
+
 
 UlixArm::UlixArm(bool gripper)
 {
@@ -11,15 +12,14 @@ UlixArm::UlixArm(bool gripper)
     // add motors
     this->motors.emplace_back(0x01, 0x11, MotorLimitParam{.q = 12.5, .dq =  8.0, .tau = 28.0}); // DM4340p
     this->motors.emplace_back(0x02, 0x12, MotorLimitParam{.q = 12.5, .dq =  8.0, .tau = 28.0}); // DM4340
-    this->motors.emplace_back(0x03, 0x13, MotorLimitParam{.q = 12.5, .dq =  8.0, .tau = 28.0}); // DM4340
-    this->motors.emplace_back(0x04, 0x14, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
+    // this->motors.emplace_back(0x03, 0x13, MotorLimitParam{.q = 12.5, .dq =  8.0, .tau = 28.0}); // DM4340
+    // this->motors.emplace_back(0x04, 0x14, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
     this->motors.emplace_back(0x05, 0x15, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
-    this->motors.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
+    // this->motors.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
 
-    if (gripper)
-        this->motors.emplace_back(0x07, 0x17, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
+    // if (gripper)
+    //     this->motors.emplace_back(0x07, 0x17, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}); // DM4310
 
-    std::cout << "Hello Ulix!" << std::endl;
     return;
 }
 
@@ -30,28 +30,29 @@ UlixArm::~UlixArm()
 }
 
 
-uint32_t UlixArm::connect()
+int UlixArm::connect()
 {
-    uint32_t rc;
+    int rc;
 
     // check status
 
     // open bus
-    this->port.init("/dev/ttyACM0", 9600, 20);
-    std::cout << "Opened bus" << std::endl;
+    rc = this->port.init("/dev/ttyACM0", 115200, 20);
+    if (rc < 0)
+    {
+        std::cout << "Failed to open bus" << std::endl;
+        return rc;
+    }        
 
     return rc;
 }
 
-uint32_t UlixArm::enable()
+int UlixArm::enable()
 {
-    uint32_t rc;
+    int rc = 1;
 
-    std::cout << std::endl << "Enable motors..." << std::endl;
-    
     // check status if connected
     
-
     for (const auto& motor : this->motors) {
         // pack frame
         SendFrame send_frame;
@@ -60,20 +61,17 @@ uint32_t UlixArm::enable()
         );
 
         // send frame
-        this->port.write(send_frame.data, sizeof(send_frame.data));
+        rc = this->port.write(send_frame.data, sizeof(send_frame.data));
     }
 
     return rc;
 }
 
-uint32_t UlixArm::disable()
+int UlixArm::disable()
 {
-    uint32_t rc;
-
-    std::cout << std::endl << "Disable motors..." << std::endl;
+    int rc;
 
     // check status
-
     
     for (const auto& motor : this->motors) {
         // pack frame
@@ -89,7 +87,29 @@ uint32_t UlixArm::disable()
     return rc;
 }
 
-uint32_t UlixArm::control(
+int UlixArm::refresh()
+{
+    int rc;
+
+    // check status
+    
+    for (const auto& motor : this->motors) {
+        // pack frame
+        SendFrame send_frame;
+        send_frame = this->protocol.encode_refresh_command(
+            motor.get_slave_id()
+        );
+        
+        // send frame
+        this->port.write(send_frame.data, sizeof(send_frame.data));
+    }
+
+    this->update_status();
+
+    return rc;
+}
+
+int UlixArm::control(
     Joints q_target,
     Joints dq_target,
     Joints tau_target,
@@ -98,9 +118,9 @@ uint32_t UlixArm::control(
     bool gravity
 )
 {
-    uint32_t rc;
+    std::cout << std::endl;
 
-    std::cout << std::endl << "Send commands..." << std::endl;
+    int rc;
 
     // check status
 
@@ -127,26 +147,20 @@ uint32_t UlixArm::control(
             kd(i)
         );
 
+        std::cout << "Target:" << std::endl;
+        std::cout << "q: " << q_target(i) << " dq: " << dq_target(i) <<  " tau: " << tau_target(i) <<  std::endl;
+
         // send frame
         this->port.write(send_frame.data, sizeof(send_frame.data));
-
-        // // send frame
-        // {
-        //     for (const auto byte : send_frame.data) {
-        //         std::cout   << std::hex
-        //         << std::uppercase
-        //         << std::setw(2)
-        //         << std::setfill('0')
-        //         << static_cast<unsigned int>(byte)
-        //         << ' ';
-        //     }
-
-        //     std::cout << std::endl;
-        // }
-
     }
 
+    this->update_status();
 
+    return rc;
+}
+
+void UlixArm::update_status()
+{
     // read feedback
     for (std::size_t i = 0; i < this->motors.size(); ++i) {
         // read raw bytes from port
@@ -168,30 +182,80 @@ uint32_t UlixArm::control(
         );
 
         // decode payload
-        uint8_t motor_id = master_id & 0x0F;
-        Motor& motor = this->motors[motor_id];
-        MotorLimitParam limit_param = motor.get_limit_param();
+        Motor* motor = this->find_motor_by_master_id(master_id);
+        MotorLimitParam limit_param = motor->get_limit_param();
+
         double q, dq, tau;
         int trot, tmos;
         this->protocol.decode_control_feedback(
             payload,
             limit_param,
-            q,
-            dq,
-            tau,
-            trot,
-            tmos            
+            q, dq, tau,
+            trot, tmos            
         );
-        
+
         // update internal state
-        motor.set_q(q);
-        motor.set_dq(dq);
-        motor.set_tau(tau);
-        motor.set_trot(trot);
-        motor.set_tmos(tmos);
-
+        motor->set_q(q);
+        motor->set_dq(dq);
+        motor->set_tau(tau);
+        motor->set_trot(trot);
+        motor->set_tmos(tmos);
     }
-
-    return rc;
 }
 
+Joints UlixArm::get_q()
+{
+    Joints q = Joints::Zero();;
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        q(i) = this->motors[i].get_q();
+    }
+    return q;
+}
+
+Joints UlixArm::get_dq()
+{
+    Joints dq = Joints::Zero();
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        dq(i) = this->motors[i].get_dq();
+    }
+    return dq;
+}
+
+Joints UlixArm::get_tau()
+{
+    Joints tau = Joints::Zero();
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        tau(i) = this->motors[i].get_tau();
+    }
+    return tau;
+}
+
+Joints UlixArm::get_tmos()
+{
+    Joints tmos = Joints::Zero();
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        tmos(i) = static_cast<double>(this->motors[i].get_tmos());
+    }
+    return tmos;
+}
+
+Joints UlixArm::get_trot()
+{
+    Joints trot = Joints::Zero();
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        trot(i) = static_cast<double>(this->motors[i].get_trot());
+    }
+    return trot;
+}
+
+
+Motor* UlixArm::find_motor_by_master_id(MotorID master_id)
+{
+    for (auto& motor : this->motors) {
+        if (motor.get_master_id() == master_id) {
+            return &motor;
+        }
+    }
+
+    return nullptr;
+}

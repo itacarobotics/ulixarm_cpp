@@ -1,4 +1,4 @@
-#include "protocol.hpp"
+#include "ulixarm_cpp/protocol.hpp"
 
 #include <algorithm>
 
@@ -230,26 +230,24 @@ void DamiaoProtocol::parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_
     }
 
     // frame.data[2] -> can data length
-    // frame.data[3] -> can ide     0: standard frame    1: extended frame
-    // frame.data[4] -> can rtr     0: data frame        1: remote frame
     
     // Master ID fed back from the motor
-    master_id = static_cast<uint32_t>(frame.data[5])
-             | (static_cast<uint32_t>(frame.data[6]) << 8)
-             | (static_cast<uint32_t>(frame.data[7]) << 16)
-             | (static_cast<uint32_t>(frame.data[8]) << 24);
+    master_id = static_cast<uint32_t>(frame.data[3])
+             | (static_cast<uint32_t>(frame.data[4]) << 8)
+             | (static_cast<uint32_t>(frame.data[5]) << 16)
+             | (static_cast<uint32_t>(frame.data[6]) << 24);
     
     // can data
-    payload.data[0] = frame.data[ 9];
-    payload.data[1] = frame.data[10];
-    payload.data[2] = frame.data[11];
-    payload.data[3] = frame.data[12];
-    payload.data[4] = frame.data[13];
-    payload.data[5] = frame.data[14];
-    payload.data[6] = frame.data[15];
-    payload.data[7] = frame.data[16];
-    
-    // frame.data[17] -> tail
+    payload.data[0] = frame.data[ 7];
+    payload.data[1] = frame.data[ 8];
+    payload.data[2] = frame.data[ 9];
+    payload.data[3] = frame.data[10];
+    payload.data[4] = frame.data[11];
+    payload.data[5] = frame.data[12];
+    payload.data[6] = frame.data[13];
+    payload.data[7] = frame.data[14];
+
+    // frame.data[15] -> tail
     
     return;
 }
@@ -260,9 +258,9 @@ void DamiaoProtocol::decode_control_feedback(Payload payload, MotorLimitParam li
     uint16_t dq_uint = (uint16_t(payload.data[3]) << 4) | (payload.data[4] >> 4);
     uint16_t tau_uint = (uint16_t(payload.data[4] & 0xf) << 8) | payload.data[5];
     
-    q   = uint_to_double(q_uint, -limit_param.q, limit_param.q, 16);
-    dq  = uint_to_double(dq_uint, -limit_param.dq, limit_param.dq, 12);
-    tau = uint_to_double(tau_uint, -limit_param.tau, limit_param.tau, 12);
+    q   = this->uint_to_double(q_uint, -limit_param.q, limit_param.q, 16);
+    dq  = this->uint_to_double(dq_uint, -limit_param.dq, limit_param.dq, 12);
+    tau = this->uint_to_double(tau_uint, -limit_param.tau, limit_param.tau, 12);
     
     tmos = static_cast<int>(payload.data[6]);
     trot = static_cast<int>(payload.data[7]);

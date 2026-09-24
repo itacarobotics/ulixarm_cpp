@@ -8,12 +8,12 @@
 
 struct SendFrame
 {
-    uint8_t data[29]{};
+    uint8_t data[30]{};
 };
 
 struct ReceiveFrame
 {
-    uint8_t data[18]{};
+    uint8_t data[16]{};
 };
 
 struct Payload
@@ -40,8 +40,8 @@ public:
     void parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload);
     void decode_control_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos);
     
-    uint8_t head = 0xAA;
-    uint8_t tail = 0x55;
+    const uint8_t head = 0xAA;
+    const uint8_t tail = 0x55;
 
 private:
     

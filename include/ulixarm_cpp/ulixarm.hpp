@@ -37,7 +37,7 @@ public:
     Joints get_tmos();
     Joints get_trot();
 
-    uint32_t control(
+    int control(
         Joints q_target,
         Joints dq_target,
         Joints tau_target,
@@ -46,16 +46,22 @@ public:
         bool gravity=true
     );
 
-    uint32_t enable();
-    uint32_t disable();
-    uint32_t connect();
+    int enable();
+    int disable();
+    int refresh();
+    int connect();
 
 private:
+    
+    Motor* find_motor_by_master_id(MotorID master_id);
+    void update_status();
+
     UlixArmStatus status;
     std::vector<Motor> motors;
 
     DamiaoProtocol protocol;
     SerialPort port;
+
 };
 
 

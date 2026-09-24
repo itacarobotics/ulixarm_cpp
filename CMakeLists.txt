@@ -17,7 +17,7 @@ add_executable(ulixarm_cpp
 
 target_include_directories(ulixarm_cpp
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/ulixarm_cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(ulixarm_cpp PRIVATE Eigen3::Eigen)

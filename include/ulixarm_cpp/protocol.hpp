@@ -37,9 +37,11 @@ public:
         double q, double dq, double tau, double kp, double kd);
 
     // read
-    uint8_t parse_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload);
-    void decode_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos);
-
+    void parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload);
+    void decode_control_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos);
+    
+    uint8_t head = 0xAA;
+    uint8_t tail = 0x55;
 
 private:
     

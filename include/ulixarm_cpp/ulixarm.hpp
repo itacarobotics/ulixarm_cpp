@@ -8,11 +8,12 @@
 
 #include "motor.hpp"
 #include "protocol.hpp"
+#include "serial_port.hpp"
 
 
 #define N_JOINTS 7
 
-typedef Eigen::Matrix<double, N_JOINTS, 1> joint_t;
+typedef Eigen::Matrix<double, N_JOINTS, 1> Joints;
 
 enum UlixArmStatus
 {
@@ -30,18 +31,19 @@ public:
     UlixArm(bool gripper=true);
     ~UlixArm();
 
-    joint_t get_q();
-    joint_t get_dq();
-    joint_t get_tau();
-    joint_t get_tmos();
-    joint_t get_trot();
+    Joints get_q();
+    Joints get_dq();
+    Joints get_tau();
+    Joints get_tmos();
+    Joints get_trot();
 
     uint32_t control(
-        joint_t q_target,
-        joint_t dq_target,
-        joint_t tau_target,
-        joint_t kp,
-        joint_t kd
+        Joints q_target,
+        Joints dq_target,
+        Joints tau_target,
+        Joints kp,
+        Joints kd,
+        bool gravity=true
     );
 
     uint32_t enable();
@@ -53,6 +55,7 @@ private:
     std::vector<Motor> motors;
 
     DamiaoProtocol protocol;
+    SerialPort port;
 };
 
 

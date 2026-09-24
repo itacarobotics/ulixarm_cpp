@@ -11,7 +11,7 @@ SendFrame DamiaoProtocol::build_usb_bridge_frame(MotorID can_id, Payload can_pay
     send_frame.data[1]  = 0xAA;
     
     // frame length
-    send_frame.data[2]  = 0x1e;  
+    send_frame.data[2]  = 0x1e;
     
     // command: 1 = forward CAN data frame
     //          2 = PC–device handshake, device responds OK
@@ -144,13 +144,15 @@ SendFrame DamiaoProtocol::encode_control_command(MotorID slave_id, MotorLimitPar
 }
 
 // read
-uint8_t DamiaoProtocol::parse_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload)
+void DamiaoProtocol::parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload)
 {
     // frame.data[0] -> header
     
     // Command  0x00: heartbeat
-    //          0x01: receive fail  0x11: receive success
-    //          0x02: send fail     0x12: send success
+    //          0x01: receive fail  
+    //          0x11: receive success
+    //          0x02: send fail
+    //          0x12: send success
     //          0x03: set baudrate fail 0x13: set baudrate success
     //          0xEE: communication error, format field contains error code
     //          0x08: overvoltage
@@ -160,8 +162,72 @@ uint8_t DamiaoProtocol::parse_bridge_frame(ReceiveFrame frame, MotorID &master_i
     //          0x0C: motor coil overtemperature
     //          0x0D: communication loss
     //          0x0E: overload
-    //          0x11: success
     uint8_t command = frame.data[1];
+
+    switch (command)
+    {
+    case 0x00:
+        // Heartbeat
+        break;
+    case 0x01:
+        throw std::runtime_error(
+            "Motor communication error: receive failed."
+        );
+    case 0x11:
+        // Receive success
+        break;
+    case 0x02:
+        throw std::runtime_error(
+            "Motor communication error: send failed."
+        );
+    case 0x12:
+        // Send success
+        break;
+    case 0x03:
+        throw std::runtime_error(
+            "Motor communication error: failed to set baudrate."
+        );
+    case 0x13:
+        // Set baudrate success
+        break;
+    case 0xEE:
+        throw std::runtime_error(
+            "Motor communication error: 0xEE"
+        );
+    case 0x08:
+        throw std::runtime_error(
+            "Motor error: overvoltage."
+        );
+    case 0x09:
+        throw std::runtime_error(
+            "Motor error: undervoltage."
+        );
+    case 0x0A:
+        throw std::runtime_error(
+            "Motor error: overcurrent."
+        );
+    case 0x0B:
+        throw std::runtime_error(
+            "Motor error: MOS overtemperature."
+        );
+    case 0x0C:
+        throw std::runtime_error(
+            "Motor error: motor coil overtemperature."
+        );
+    case 0x0D:
+        throw std::runtime_error(
+            "Motor error: communication loss."
+        );
+    case 0x0E:
+        throw std::runtime_error(
+            "Motor error: overload."
+        );
+    default:
+        throw std::runtime_error(
+            "Motor communication error: unknown command 0x" +
+            std::to_string(command)
+        );
+    }
 
     // frame.data[2] -> can data length
     // frame.data[3] -> can ide     0: standard frame    1: extended frame
@@ -184,12 +250,11 @@ uint8_t DamiaoProtocol::parse_bridge_frame(ReceiveFrame frame, MotorID &master_i
     payload.data[7] = frame.data[16];
     
     // frame.data[17] -> tail
-
-    return command;
     
+    return;
 }
 
-void DamiaoProtocol::decode_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos)
+void DamiaoProtocol::decode_control_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos)
 {
     uint16_t q_uint = (uint16_t(payload.data[1]) << 8) | payload.data[2];
     uint16_t dq_uint = (uint16_t(payload.data[3]) << 4) | (payload.data[4] >> 4);

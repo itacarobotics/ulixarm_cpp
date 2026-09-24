@@ -4,7 +4,9 @@
 
 UlixArm::UlixArm(bool gripper)
 {
-    this->status=IDLE;
+    this->status = UlixArmStatus::IDLE;
+
+    // create pinocchio model and data
 
     // add motors
     this->motors.emplace_back(0x01, 0x11, MotorLimitParam{.q = 12.5, .dq =  8.0, .tau = 28.0}); // DM4340p
@@ -23,6 +25,7 @@ UlixArm::UlixArm(bool gripper)
 
 UlixArm::~UlixArm()
 {
+    // close serial
     return;
 }
 
@@ -34,6 +37,7 @@ uint32_t UlixArm::connect()
     // check status
 
     // open bus
+    this->port.init("/dev/ttyACM0", 9600, 20);
     std::cout << "Opened bus" << std::endl;
 
     return rc;
@@ -49,26 +53,14 @@ uint32_t UlixArm::enable()
     
 
     for (const auto& motor : this->motors) {
-        
-        MotorID slave_id = motor.get_slave_id();
-        
         // pack frame
         SendFrame send_frame;
-        send_frame = protocol.encode_enable_command(slave_id);
+        send_frame = this->protocol.encode_enable_command(
+            motor.get_slave_id()
+        );
 
         // send frame
-        {
-            for (const auto byte : send_frame.data) {
-                std::cout   << std::hex
-                << std::uppercase
-                << std::setw(2)
-                << std::setfill('0')
-                << static_cast<unsigned int>(byte)
-                << ' ';
-            }
-
-            std::cout << std::endl;
-        }
+        this->port.write(send_frame.data, sizeof(send_frame.data));
     }
 
     return rc;
@@ -84,38 +76,26 @@ uint32_t UlixArm::disable()
 
     
     for (const auto& motor : this->motors) {
-        
-        MotorID slave_id = motor.get_slave_id();
-        
         // pack frame
         SendFrame send_frame;
-        send_frame = protocol.encode_disable_command(slave_id);
-
+        send_frame = this->protocol.encode_disable_command(
+            motor.get_slave_id()
+        );
+        
         // send frame
-        {
-            for (const auto byte : send_frame.data) {
-                std::cout   << std::hex
-                << std::uppercase
-                << std::setw(2)
-                << std::setfill('0')
-                << static_cast<unsigned int>(byte)
-                << ' ';
-            }
-
-            std::cout << std::endl;
-        }
-
+        this->port.write(send_frame.data, sizeof(send_frame.data));
     }
 
     return rc;
 }
 
 uint32_t UlixArm::control(
-    joint_t q_target,
-    joint_t dq_target,
-    joint_t tau_target,
-    joint_t kp,
-    joint_t kd
+    Joints q_target,
+    Joints dq_target,
+    Joints tau_target,
+    Joints kp,
+    Joints kd,
+    bool gravity
 )
 {
     uint32_t rc;
@@ -124,13 +104,20 @@ uint32_t UlixArm::control(
 
     // check status
 
-    // for loop 1
+
+    // compute tau gravity
+    if (gravity)
+    {
+        // pinocchio   
+    }
+
+    // send commands
     for (std::size_t i = 0; i < this->motors.size(); ++i) {
         const auto& motor = this->motors[i];
 
         // pack frame
         SendFrame send_frame;
-        send_frame = protocol.encode_control_command(
+        send_frame = this->protocol.encode_control_command(
             motor.get_slave_id(),
             motor.get_limit_param(),
             q_target(i),
@@ -141,31 +128,69 @@ uint32_t UlixArm::control(
         );
 
         // send frame
-        {
-            for (const auto byte : send_frame.data) {
-                std::cout   << std::hex
-                << std::uppercase
-                << std::setw(2)
-                << std::setfill('0')
-                << static_cast<unsigned int>(byte)
-                << ' ';
-            }
+        this->port.write(send_frame.data, sizeof(send_frame.data));
 
-            std::cout << std::endl;
-        }
+        // // send frame
+        // {
+        //     for (const auto byte : send_frame.data) {
+        //         std::cout   << std::hex
+        //         << std::uppercase
+        //         << std::setw(2)
+        //         << std::setfill('0')
+        //         << static_cast<unsigned int>(byte)
+        //         << ' ';
+        //     }
+
+        //     std::cout << std::endl;
+        // }
 
     }
 
-    // pack frame
 
-    // send frame
+    // read feedback
+    for (std::size_t i = 0; i < this->motors.size(); ++i) {
+        // read raw bytes from port
+        ReceiveFrame receive_frame;
+        this->port.read(
+            receive_frame.data, 
+            this->protocol.head,
+            this->protocol.tail,
+            sizeof(receive_frame.data)
+        );
 
+        // parse master id and payload
+        MotorID master_id;
+        Payload payload;
+        this->protocol.parse_usb_bridge_frame(
+            receive_frame,
+            master_id,
+            payload
+        );
 
-    // for loop 2
+        // decode payload
+        uint8_t motor_id = master_id & 0x0F;
+        Motor& motor = this->motors[motor_id];
+        MotorLimitParam limit_param = motor.get_limit_param();
+        double q, dq, tau;
+        int trot, tmos;
+        this->protocol.decode_control_feedback(
+            payload,
+            limit_param,
+            q,
+            dq,
+            tau,
+            trot,
+            tmos            
+        );
+        
+        // update internal state
+        motor.set_q(q);
+        motor.set_dq(dq);
+        motor.set_tau(tau);
+        motor.set_trot(trot);
+        motor.set_tmos(tmos);
 
-    // read frame
-
-    // unpack frame
+    }
 
     return rc;
 }

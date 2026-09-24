@@ -12,6 +12,7 @@ add_executable(ulixarm_cpp
     src/main.cpp
     src/ulixarm.cpp
     src/protocol.cpp
+    src/serial_port.cpp
 )
 
 target_include_directories(ulixarm_cpp

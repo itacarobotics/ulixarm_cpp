@@ -1,5 +1,4 @@
-#ifndef ULIXARM_CPP_ULIXARM_HPP
-#define ULIXARM_CPP_ULIXARM_HPP
+#pragma once
 
 #include <iostream>
 #include <Eigen/Dense>
@@ -49,12 +48,12 @@ public:
     int enable();
     int disable();
     int refresh();
-    int connect();
+    void connect(const char* port);
 
 private:
     
     Motor* find_motor_by_master_id(MotorID master_id);
-    void update_status();
+    void read_feedback();
 
     UlixArmStatus status;
     std::vector<Motor> motors;
@@ -62,7 +61,7 @@ private:
     DamiaoProtocol protocol;
     SerialPort port;
 
+    const uint baudrate = 921600;
+    const uint timeout_ms = 10;
+
 };
-
-
-#endif // ULIXARM_CPP_ULIXARM_HPP

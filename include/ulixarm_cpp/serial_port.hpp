@@ -1,13 +1,11 @@
 #pragma once
 
 #include <libserialport.h>
-#include <sys/types.h>
 
 #include <cstdint>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
-#include <exception>
 
 class SerialPort
 {

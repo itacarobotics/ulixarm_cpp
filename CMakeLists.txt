@@ -7,13 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 find_package(PkgConfig REQUIRED)
+find_package(pinocchio REQUIRED)
 
 pkg_check_modules(LIBSERIALPORT REQUIRED libserialport)
 
 add_executable(ulixarm_cpp
-src/main.cpp
-src/ulixarm.cpp
-src/protocol.cpp
+    src/main.cpp
+    src/ulixarm.cpp
+    src/protocol.cpp
 )
 
 target_include_directories(ulixarm_cpp 
@@ -26,5 +27,8 @@ PRIVATE
 ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(ulixarm_cpp PRIVATE ${LIBSERIALPORT_LIBRARIES})
-target_link_libraries(ulixarm_cpp PRIVATE Eigen3::Eigen)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    ${LIBSERIALPORT_LIBRARIES}
+    Eigen3::Eigen
+    pinocchio::pinocchio
+)

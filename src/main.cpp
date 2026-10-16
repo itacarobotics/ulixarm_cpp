@@ -4,135 +4,86 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <algorithm>
-
-void print_exception(const std::exception& e, int level = 0);
-
+#include <limits>
 
 int main()
 {
-    UlixArm robot(/*gripper*/ false);
+    UlixArm robot(/*gripper*/ true);
 
     try
     {
         robot.connect("/dev/ttyACM0");
+        robot.enable();
+        robot.refresh();
     }
-    catch(const std::exception& e)
+    catch (const std::exception& e)
     {
-        print_exception(e);
+        std::cerr << "Robot initialization failed: " << e.what() << '\n';
         return -1;
     }
-    
 
-    for (size_t i = 0; i < 10; i++)
+    Joints q   = Joints::Zero();
+    Joints dq  = Joints::Zero();
+    Joints tau = Joints::Zero();
+    Joints kp  = Joints::Zero();
+    Joints kd  = Joints::Zero();
+
+    using Clock = std::chrono::steady_clock;
+
+    double min_latency = std::numeric_limits<double>::max();
+    double max_latency = 0.0;
+    double sum_latency = 0.0;
+    double sum_squared = 0.0;
+
+    long long count = 0;
+
+    constexpr long long PRINT_INTERVAL = 1000;
+
+    std::cout << std::fixed << std::setprecision(2);
+
+    while (true)
     {
-        robot.enable();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        robot.disable();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        const auto start = Clock::now();
+
+        robot.control(q, dq, tau, kp, kd, true);
+
+        const auto end = Clock::now();
+
+        const double latency_us =
+            std::chrono::duration<double, std::micro>(
+                end - start
+            ).count();
+
+        min_latency = std::min(min_latency, latency_us);
+        max_latency = std::max(max_latency, latency_us);
+        sum_latency += latency_us;
+        sum_squared += latency_us * latency_us;
+
+        ++count;
+
+        if (count % PRINT_INTERVAL == 0)
+        {
+            const double avg_latency = sum_latency / count;
+
+            const double variance =
+                std::max(0.0, sum_squared / count
+                              - avg_latency * avg_latency);
+
+            const double stddev_latency = std::sqrt(variance);
+
+            std::cout
+                << "Iterations: " << count
+                << " | Current: " << latency_us << " us"
+                << " | Min: " << min_latency << " us"
+                << " | Max: " << max_latency << " us"
+                << " | Avg: " << avg_latency << " us"
+                << " | StdDev: " << stddev_latency << " us"
+                << '\n';
+        }
     }
 
-    robot.enable();
-
-    // return 0;
-    std::vector<double> timings_us;
-
-    const double timeout = 10.0;
-    
-    auto start = std::chrono::steady_clock::now();
-    
-    while (std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start).count() < timeout)
-    {
-    //     double t = std::chrono::duration<double>(
-    //         std::chrono::steady_clock::now().time_since_epoch()).count();
-    
-    //     double sin_val = std::sin(t);
-    //     double cos_val = std::cos(t);
-    
-    //     Joints q;
-    //     q << sin_val, sin_val, sin_val, sin_val, sin_val, sin_val, sin_val;
-        
-    //     Joints dq;
-    //     dq << cos_val, cos_val, cos_val, cos_val, cos_val, cos_val, cos_val;
-        
-    //     Joints tau;
-    //     tau << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        
-    //     Joints kp;
-    //     kp << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    //     // kp << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        
-    //     Joints kd;
-    //     kd << 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0;
-        
-    //     robot.control(q, dq, tau, kp, kd);
-    
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    
-        auto start = std::chrono::steady_clock::now();
-
-        robot.refresh();
-
-        auto end = std::chrono::steady_clock::now();
-
-        double elapsed_us =
-            std::chrono::duration<double, std::micro>(end - start).count();
-
-        timings_us.push_back(elapsed_us);
-
-        // Calculate mean
-        double mean_us = 0.0;
-        for (double t : timings_us)
-            mean_us += t;
-        mean_us /= timings_us.size();
-
-        // Calculate max
-        double max_us = *std::max_element(timings_us.begin(), timings_us.end());
-
-        // Calculate standard deviation
-        double variance = 0.0;
-        for (double t : timings_us)
-            variance += (t - mean_us) * (t - mean_us);
-        variance /= timings_us.size();
-
-        double std_us = std::sqrt(variance);
-
-        // Overwrite the same terminal line
-        std::cout << "\r\033[K"
-                << "robot.refresh(): mean=" << mean_us
-                << " us, max=" << max_us
-                << " us, std=" << std_us
-                << " us"
-                << std::flush;
-
-        // robot.refresh();
-        // std::cout << robot.get_q()(0) << " " << robot.get_q()(1) << " " << robot.get_q()(2) << " " << robot.get_q()(3) << std::endl;
-
-    }
-
-    robot.disable();
-}
-
-
-
-void print_exception(const std::exception& e, int level = 0)
-{
-    std::cerr << std::string(level * 2, ' ')
-              << e.what() << '\n';
-
-    try
-    {
-        std::rethrow_if_nested(e);
-    }
-    catch (const std::exception& nested)
-    {
-        print_exception(nested, level + 1);
-    }
-    catch (...)
-    {
-        std::cerr << std::string((level + 1) * 2, ' ')
-                  << "Unknown exception\n";
-    }
+    return 0;
 }

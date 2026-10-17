@@ -24,6 +24,18 @@ int main()
         std::cerr << "Robot initialization failed: " << e.what() << '\n';
         return -1;
     }
+    
+    for (size_t i = 0; i < 10; i++)
+    {
+        robot.open(0.05);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        
+        robot.close();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+
+    // robot.disable();
+    return 1;
 
     Joints q   = Joints::Zero();
     Joints dq  = Joints::Zero();

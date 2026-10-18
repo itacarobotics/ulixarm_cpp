@@ -1,7 +1,5 @@
 #include "ulixarm_cpp/ulixarm.hpp"
 
-#include <iomanip>
-
 
 UlixArm::UlixArm(bool gripper)
 {
@@ -146,6 +144,9 @@ void UlixArm::enable()
     this->enable_motors(this->motors_manipulator);
     this->enable_motors(this->motors_gripper);
 
+    // refresh motors status
+    this->refresh();
+
     this->status = UlixArmStatus::ENABLED;
     return;
 }
@@ -271,6 +272,9 @@ void UlixArm::refresh()
     this->refresh_motors(this->motors_manipulator);
     this->refresh_motors(this->motors_gripper);
 
+    // update motor_status_timestamp
+    this->motors_update_timestamp = std::chrono::steady_clock::now();
+
     return;
 }
 
@@ -366,6 +370,9 @@ void UlixArm::control(
 
     }
 
+    // update motors_update_timestamp
+    this->motors_update_timestamp = std::chrono::steady_clock::now();
+
     this->status = UlixArmStatus::ENABLED;
     return;
 }
@@ -444,90 +451,95 @@ void UlixArm::read_feedback()
 
 Joints UlixArm::get_q()
 {
+    const auto motors_update_age = std::chrono::steady_clock::now() - this->motors_update_timestamp;
+
+    if (motors_update_age > this->max_motors_update_age)
+    {
+        throw std::runtime_error(
+                "Cannot consume motor data older than " +
+                std::to_string(max_motors_update_age.count()) + " ms."
+            );
+    }
+
     Joints q = Joints::Zero();
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
-        try
-        {
-            q[i] = this->motors_manipulator[i].get_q();
-        }
-        catch(...)
-        {
-            std::throw_with_nested(
-                std::runtime_error("Reading motor q value too old.")
-            );
-        }
+        q[i] = this->motors_manipulator[i].get_q();
     }
     return q;
 }
 
 Joints UlixArm::get_dq()
 {
+    const auto motors_update_age = std::chrono::steady_clock::now() - this->motors_update_timestamp;
+
+    if (motors_update_age > this->max_motors_update_age)
+    {
+        throw std::runtime_error(
+                "Cannot consume motor data older than " +
+                std::to_string(max_motors_update_age.count()) + " ms."
+            );
+    }
+
     Joints dq = Joints::Zero();
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
-        try
-        {
-            dq[i] = this->motors_manipulator[i].get_dq();
-        }
-        catch(...)
-        {
-            std::throw_with_nested(
-                std::runtime_error("Reading motor dq value too old.")
-            );
-        }
+        dq[i] = this->motors_manipulator[i].get_dq();
     }
     return dq;
 }
 
 Joints UlixArm::get_tau()
 {
+    const auto motors_update_age = std::chrono::steady_clock::now() - this->motors_update_timestamp;
+
+    if (motors_update_age > this->max_motors_update_age)
+    {
+        throw std::runtime_error(
+                "Cannot consume motor data older than " +
+                std::to_string(max_motors_update_age.count()) + " ms."
+            );
+    }
+
     Joints tau = Joints::Zero();
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
-        try
-        {
-            tau[i] = this->motors_manipulator[i].get_tau();
-        }
-        catch(...)
-        {
-            std::throw_with_nested(
-                std::runtime_error("Reading motor tau value too old.")
-            );
-        }
+        tau[i] = this->motors_manipulator[i].get_tau();
     }
     return tau;
 }
 
 Joints UlixArm::get_tmos()
 {
+    const auto motors_update_age = std::chrono::steady_clock::now() - this->motors_update_timestamp;
+
+    if (motors_update_age > this->max_motors_update_age)
+    {
+        throw std::runtime_error(
+                "Cannot consume motor data older than " +
+                std::to_string(max_motors_update_age.count()) + " ms."
+            );
+    }
+
     Joints tmos = Joints::Zero();
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
-        try
-        {
-            tmos[i] = static_cast<double>(this->motors_manipulator[i].get_tmos());
-        }
-        catch(...)
-        {
-            std::throw_with_nested(
-                std::runtime_error("Reading motor tmos value too old.")
-            );
-        }
+        tmos[i] = static_cast<double>(this->motors_manipulator[i].get_tmos());
     }
     return tmos;
 }
 
 Joints UlixArm::get_trot()
 {
+    const auto motors_update_age = std::chrono::steady_clock::now() - this->motors_update_timestamp;
+
+    if (motors_update_age > this->max_motors_update_age)
+    {
+        throw std::runtime_error(
+                "Cannot consume motor data older than " +
+                std::to_string(max_motors_update_age.count()) + " ms."
+            );
+    }
+
     Joints trot = Joints::Zero();
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
-        try
-        {
-            trot[i] = static_cast<double>(this->motors_manipulator[i].get_trot());
-        }
-        catch(...)
-        {
-            std::throw_with_nested(
-                std::runtime_error("Reading motor trot value too old.")
-            );
-        }
+        trot[i] = static_cast<double>(this->motors_manipulator[i].get_trot());
     }
     return trot;
 }

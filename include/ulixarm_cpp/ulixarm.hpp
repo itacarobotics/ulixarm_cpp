@@ -4,6 +4,8 @@
 #include <Eigen/Dense>
 #include <stdint.h>
 #include <vector>
+#include <iomanip>
+#include <chrono>
 
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
@@ -365,4 +367,7 @@ private:
      * with pin_model.
      */
     pinocchio::Data pin_data;
+
+    std::chrono::steady_clock::time_point motors_update_timestamp;
+    const std::chrono::milliseconds max_motors_update_age{100};
 };

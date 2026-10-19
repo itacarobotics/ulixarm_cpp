@@ -1,13 +1,9 @@
-#include "ulixarm_cpp/ulixarm.hpp"
-
-#include <thread>
-#include <chrono>
-#include <cmath>
 #include <iostream>
-#include <iomanip>
-#include <vector>
-#include <algorithm>
-#include <limits>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <chrono>
+#include "ulixarm_cpp/ulixarm.hpp"
 
 int main()
 {
@@ -21,21 +17,9 @@ int main()
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Robot initialization failed: " << e.what() << '\n';
+        robot.log_errors(e);
         return -1;
     }
-    
-    for (size_t i = 0; i < 10; i++)
-    {
-        robot.open(0.05);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        
-        robot.close();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-
-    // robot.disable();
-    return 1;
 
     Joints q   = Joints::Zero();
     Joints dq  = Joints::Zero();
@@ -43,59 +27,49 @@ int main()
     Joints kp  = Joints::Zero();
     Joints kd  = Joints::Zero();
 
-    using Clock = std::chrono::steady_clock;
+    // Configure terminal for non-blocking, single-character input
+    termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt);
 
-    double min_latency = std::numeric_limits<double>::max();
-    double max_latency = 0.0;
-    double sum_latency = 0.0;
-    double sum_squared = 0.0;
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-    long long count = 0;
+    int old_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, old_flags | O_NONBLOCK);
 
-    constexpr long long PRINT_INTERVAL = 1000;
+    bool running = true;
 
-    std::cout << std::fixed << std::setprecision(2);
-
-    while (true)
+    while (running)
     {
-        const auto start = Clock::now();
-
+        // Keep robot control running
         robot.control(q, dq, tau, kp, kd, true);
 
-        const auto end = Clock::now();
-
-        const double latency_us =
-            std::chrono::duration<double, std::micro>(
-                end - start
-            ).count();
-
-        min_latency = std::min(min_latency, latency_us);
-        max_latency = std::max(max_latency, latency_us);
-        sum_latency += latency_us;
-        sum_squared += latency_us * latency_us;
-
-        ++count;
-
-        if (count % PRINT_INTERVAL == 0)
+        char input;
+        if (read(STDIN_FILENO, &input, 1) > 0)
         {
-            const double avg_latency = sum_latency / count;
+            switch (input)
+            {
+                case 'o':
+                    robot.open();
+                    break;
 
-            const double variance =
-                std::max(0.0, sum_squared / count
-                              - avg_latency * avg_latency);
+                case 'c':
+                    robot.close(0.4);
+                    break;
 
-            const double stddev_latency = std::sqrt(variance);
-
-            std::cout
-                << "Iterations: " << count
-                << " | Current: " << latency_us << " us"
-                << " | Min: " << min_latency << " us"
-                << " | Max: " << max_latency << " us"
-                << " | Avg: " << avg_latency << " us"
-                << " | StdDev: " << stddev_latency << " us"
-                << '\n';
+                case 'q':
+                    running = false;
+                    break;
+            }
         }
     }
 
+    robot.hold();
+
+    // Restore terminal settings
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, old_flags);
+    
     return 0;
 }

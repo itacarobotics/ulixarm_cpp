@@ -10,8 +10,12 @@
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/geometry.hpp>
 #include <pinocchio/multibody/model.hpp>
 #include <pinocchio/multibody/data.hpp>
+#include <pinocchio/collision/collision.hpp>
+
 
 #include "motor.hpp"
 #include "protocol.hpp"
@@ -303,6 +307,13 @@ private:
     void check_joint_limits(Joints q_target, Joints dq_target, Joints tau_target);
 
     /**
+     * @brief Checks for self collisions.
+     *
+     * @param q_target Desired joint positions, in radians.
+     */
+    void check_self_collision(Joints q_target);
+
+    /**
      * @brief Converts a gripper opening into a motor position.
      *
      * Inverse kinematics for the gripper: given how far open you want it,
@@ -368,6 +379,23 @@ private:
      */
     pinocchio::Data pin_data;
 
+    pinocchio::GeometryModel pin_collision_model;
+    pinocchio::GeometryData pin_collision_data;
+
+    /**
+     * @brief Timestamp of the most recent motor data update.
+     *
+     * Used to determine the age of the motor data and prevent consuming
+     * stale measurements.
+     */
     std::chrono::steady_clock::time_point motors_update_timestamp;
+
+    /**
+     * @brief Maximum allowed age of motor data.
+     *
+     * Motor data older than this duration is considered stale and cannot
+     * be consumed. Defaults to 100 milliseconds.
+     */
     const std::chrono::milliseconds max_motors_update_age{100};
+
 };

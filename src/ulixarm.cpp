@@ -21,11 +21,29 @@ UlixArm::UlixArm(bool gripper)
     this->motors_manipulator.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "joint6"); // DM4310
     
     // create pinocchio model and data
-    const std::string urdf_path = "ulixarm_description/src/ulixarm_description/urdf/robot.urdf";
+    const std::string package_path = "ulixarm_description/src/ulixarm_description";
+    const std::string urdf_path = package_path + "/urdf/robot.urdf";
+
     try
     {
         pinocchio::urdf::buildModel(urdf_path, this->pin_model);
+
         this->pin_data = pinocchio::Data(this->pin_model);
+
+        // // Resolve package://ulixarm_description/... paths
+        // const std::vector<std::string> package_dirs = {
+        //     package_path
+        // };
+
+        // pinocchio::urdf::buildGeom(
+        //     this->pin_model,
+        //     urdf_path,
+        //     pinocchio::COLLISION,
+        //     this->pin_collision_model,
+        //     package_dirs
+        // );
+
+        // this->pin_collision_data = pinocchio::GeometryData(this->pin_collision_model);
     }
     catch(...)
     {
@@ -57,14 +75,9 @@ void UlixArm::connect(const char* port)
     case UlixArmStatus::CONNECTED:
     case UlixArmStatus::DISABLED:
     case UlixArmStatus::ENABLED:
-    case UlixArmStatus::RUNNING:
-    throw std::runtime_error("Robot already connected.");
-        return;
-    
+        throw std::runtime_error("Robot already connected.");
     case UlixArmStatus::ERROR:
-    throw std::runtime_error("Robot status error.");
-        return;
-    
+        throw std::runtime_error("Robot status error.");
     case UlixArmStatus::IDLE:
     default:
         break;
@@ -75,8 +88,8 @@ void UlixArm::connect(const char* port)
     {
         this->port.init(
             port,       // name of port
-            921600,     // baudrate [byte/s]
-            10          // byte timeout [ms]
+            static_cast <unsigned int>(921600), // baudrate [byte/s]
+            static_cast <unsigned int>(10)      // byte timeout [ms]
         );
     }
     catch(...)
@@ -84,7 +97,6 @@ void UlixArm::connect(const char* port)
         std::throw_with_nested(
             std::runtime_error("Failed to init port.")
         );
-        return;
     }
 
     this->status = UlixArmStatus::CONNECTED;
@@ -121,18 +133,10 @@ void UlixArm::enable()
     // check status
     switch (this->status)
     {
-    case UlixArmStatus::RUNNING:
-        throw std::runtime_error("Robot is running.");
-        return;
-        
     case UlixArmStatus::IDLE:
         throw std::runtime_error("Robot is not connected.");
-        return;
-
     case UlixArmStatus::ERROR:
         throw std::runtime_error("Robot status error.");
-        return;
-
     case UlixArmStatus::DISABLED:
     case UlixArmStatus::ENABLED:
     case UlixArmStatus::CONNECTED:
@@ -143,9 +147,6 @@ void UlixArm::enable()
     // enable motors by group
     this->enable_motors(this->motors_manipulator);
     this->enable_motors(this->motors_gripper);
-
-    // refresh motors status
-    this->refresh();
 
     this->status = UlixArmStatus::ENABLED;
     return;
@@ -183,18 +184,10 @@ void UlixArm::disable()
     // check status
     switch (this->status)
     {
-    case UlixArmStatus::RUNNING:
-        throw std::runtime_error("Robot is running.");
-        return;
-
     case UlixArmStatus::IDLE:
         throw std::runtime_error("Robot is not connected.");
-        return;
-
     case UlixArmStatus::ERROR:
         throw std::runtime_error("Robot status error.");
-        return;
-
     case UlixArmStatus::DISABLED:
     case UlixArmStatus::ENABLED:
     case UlixArmStatus::CONNECTED:
@@ -246,23 +239,13 @@ void UlixArm::refresh()
     // check status
     switch (this->status)
     {
-    case UlixArmStatus::RUNNING:
-        throw std::runtime_error("Robot is running.");
-        return;
-
     case UlixArmStatus::IDLE:
         throw std::runtime_error("Robot is not connected.");
-        return;
-        
     case UlixArmStatus::DISABLED:
     case UlixArmStatus::CONNECTED:
         throw std::runtime_error("Robot is not enabled.");
-        return;
-    
     case UlixArmStatus::ERROR:
         throw std::runtime_error("Robot status error.");
-        return;
-
     case UlixArmStatus::ENABLED:
     default:
         break;
@@ -291,29 +274,17 @@ void UlixArm::control(
     // check status
     switch (this->status)
     {
-    case UlixArmStatus::RUNNING:
-        throw std::runtime_error("Robot is running.");
-        return;
-
     case UlixArmStatus::IDLE:
         throw std::runtime_error("Robot is not connected.");
-        return;
-        
     case UlixArmStatus::DISABLED:
     case UlixArmStatus::CONNECTED:
         throw std::runtime_error("Robot is not enabled.");
-        return;
-    
     case UlixArmStatus::ERROR:
         throw std::runtime_error("Robot status error.");
-        return;
-
     case UlixArmStatus::ENABLED:
     default:
         break;
     }
-
-    this->status = UlixArmStatus::RUNNING;
 
     // compute tau gravity
     if (gravity)
@@ -326,14 +297,17 @@ void UlixArm::control(
     try
     {
         this->check_joint_limits(q_target, dq_target, tau_target);
+        this->check_self_collision(q_target);
     }
     catch(...)
     {
         std::throw_with_nested(
-            std::runtime_error("Joint limits detected")
+            std::runtime_error("Invalid target command.")
         );
-        return;
     }
+
+    // check motor temperatures
+    // @todo
 
     // send commands
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
@@ -363,9 +337,8 @@ void UlixArm::control(
         catch(...)
         {
             std::throw_with_nested(
-                std::runtime_error("Failed to control motor " + motor.get_joint_name())
+                std::runtime_error("Failed to send motor commands to " + motor.get_joint_name())
             );
-            return;
         }
 
     }
@@ -373,7 +346,6 @@ void UlixArm::control(
     // update motors_update_timestamp
     this->motors_update_timestamp = std::chrono::steady_clock::now();
 
-    this->status = UlixArmStatus::ENABLED;
     return;
 }
 
@@ -614,14 +586,16 @@ void UlixArm::check_joint_limits(Joints q_target, Joints dq_target, Joints tau_t
         const auto q_idx = joint.idx_q();
         const double q = q_target[i];
 
-        if (!std::isfinite(q)) {
+        if (!std::isfinite(q)) 
+        {
             throw std::runtime_error(
                 "Joint '" + joint_name + "' has a non-finite position."
             );
         }
 
         if (q < this->pin_model.lowerPositionLimit[q_idx] ||
-            q > this->pin_model.upperPositionLimit[q_idx]) {
+            q > this->pin_model.upperPositionLimit[q_idx]) 
+        {
             throw std::out_of_range(
                 "Joint '" + joint_name + "' position limit exceeded."
             );
@@ -632,7 +606,8 @@ void UlixArm::check_joint_limits(Joints q_target, Joints dq_target, Joints tau_t
         const double max_dq = std::min(urdf_dq, limit_param.dq);
         const double dq = dq_target[i];
 
-        if (std::abs(dq) > max_dq) {
+        if (std::abs(dq) > max_dq) 
+        {
             throw std::out_of_range(
                 "Joint '" + joint_name + "' velocity limit exceeded."
             );
@@ -643,7 +618,8 @@ void UlixArm::check_joint_limits(Joints q_target, Joints dq_target, Joints tau_t
         const double max_tau = std::min(urdf_tau, limit_param.tau);
         const double tau = tau_target[i];
 
-        if (std::abs(tau) > max_tau) {
+        if (std::abs(tau) > max_tau) 
+        {
             throw std::out_of_range(
                 "Joint '" + joint_name + "' effort limit exceeded."
             );
@@ -651,6 +627,45 @@ void UlixArm::check_joint_limits(Joints q_target, Joints dq_target, Joints tau_t
     }
 }
 
+
+void UlixArm::check_self_collision(Joints q_target)
+{
+    // // Construct Pinocchio configuration vector.
+    // Eigen::VectorXd q = Eigen::VectorXd::Zero(this->pin_model.nq);
+
+    // // Map target joint values to Pinocchio configuration indices.
+    // for (size_t i=0; i<q_target.size(); i++)
+    // {
+    //     const pinocchio::JointIndex joint_id = static_cast<pinocchio::JointIndex>(i + 1);
+
+    //     if (joint_id >= this->pin_model.njoints)
+    //     {
+    //         throw std::runtime_error(
+    //             "Joint index exceeds Pinocchio model size"
+    //         );
+    //     }
+
+    //     q[this->pin_model.idx_qs[joint_id]] = q_target[i];
+    // }
+
+    // // Update collision geometry placements.
+    // pinocchio::updateGeometryPlacements(
+    //     this->pin_model,
+    //     this->pin_data,
+    //     this->pin_collision_model,
+    //     this->pin_collision_data,
+    //     q
+    // );
+
+    // // Check registered collision pairs.
+    // for (std::size_t i = 0; i < this->pin_collision_model.collisionPairs.size(); i++)
+    // {
+    //     if (this->pin_collision_data.collisionResults[i].isCollision())
+    //     {
+    //         throw std::runtime_error("Collision detected");
+    //     }
+    // }
+}
 
 void UlixArm::log_errors(const std::exception& e, int level)
 {
@@ -721,7 +736,7 @@ void UlixArm::open(double d)
 
     double q_open = this->gripper_ik(0.0) - this->gripper_ik(d);
     
-    double kp_open = 5.0;
+    double kp_open = 4.0;
     double kd_open = 0.5;
 
     const auto& motor = this->motors_gripper[0];

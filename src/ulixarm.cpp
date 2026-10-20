@@ -9,7 +9,7 @@ UlixArm::UlixArm(bool gripper)
     // add motors of gripper
     if (this->gripper)
     {
-        this->motors_gripper.emplace_back(0x07, 0x17, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "gripper"); // DM4310
+        this->motors_gripper.emplace_back(0x07, 0x17, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "finger_right_joint"); // DM4310
     }
     
     // add motors of manipulator
@@ -296,7 +296,7 @@ void UlixArm::control(
     // check joint limits
     try
     {
-        this->check_joint_limits(q_target, dq_target, tau_target);
+        this->check_manipulator_joint_limits(q_target, dq_target, tau_target);
         this->check_self_collision(q_target);
     }
     catch(...)
@@ -562,7 +562,7 @@ Joints UlixArm::compute_tau_gravity(Joints q)
 }
 
 
-void UlixArm::check_joint_limits(Joints q_target, Joints dq_target, Joints tau_target)
+void UlixArm::check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target)
 {
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
         
@@ -686,33 +686,26 @@ void UlixArm::log_errors(const std::exception& e, int level)
 }
 
 
-double UlixArm::gripper_ik(double s)
+double UlixArm::gripper_ik(double d)
 {
-    constexpr double l1 = 0.033;
-    constexpr double l2 = 0.035;
-    constexpr double c  = -0.0156;
-    constexpr double d  = 0.0165;
+    constexpr double l1 = 0.033;    // rotor link
+    constexpr double l2 = 0.035;    // rod link
+    constexpr double e  = -0.0156;  // offset perpendicular to rail axis
+    constexpr double f  = 0.0165;   // offset parallel to rail axis
 
-    // Check the specified input range.
-    if (s < 0.0 || s > 0.045)
-        return std::numeric_limits<double>::quiet_NaN();
+    const double A = d + f;
 
-    const double A = s + d;
-
-    const double R = std::hypot(A, c);
+    const double R = std::hypot(A, e);
 
     const double K =
-        (A * A + c * c + l1 * l1 - l2 * l2)
+        (A * A + e * e + l1 * l1 - l2 * l2)
         / (2.0 * l1);
 
     // Protect acos() against floating-point roundoff.
     double Q = K / R;
 
-    if (Q < -1.0 || Q > 1.0)
-        return std::numeric_limits<double>::quiet_NaN();
-
     // Select the solution branch satisfying -1.5 <= th1 <= 0.
-    const double th1 = std::atan2(c, A) - std::acos(Q);
+    const double th1 = std::atan2(e, A) - std::acos(Q);
 
     return th1;
 }
@@ -720,25 +713,22 @@ double UlixArm::gripper_ik(double s)
 
 void UlixArm::open()
 {
-    double d_open = 0.088;
+    double d_open = 0.080; // default: not fully open
     this->open(d_open);
 }
 
 
 void UlixArm::open(double d)
 {
-    d /= 2.0;
+    // finger joint moves half the opening
+    double d_half = d / 2.0;
 
-    if (d < 0.0 || d > 0.045)
-    {
-        return;
-    }
-
-    double q_open = this->gripper_ik(0.0) - this->gripper_ik(d);
+    // throw if joint limits exceed
+    this->check_gripper_joint_limits(d_half);
     
-    double kp_open = 4.0;
-    double kd_open = 0.5;
-
+    // compute angle of motor -> motor angle is zero for opening zero.
+    double q_open = this->gripper_ik(0.0) - this->gripper_ik(d_half);
+    
     const auto& motor = this->motors_gripper[0];
     
     try
@@ -748,11 +738,11 @@ void UlixArm::open(double d)
         send_frame = this->protocol.encode_control_command(
             motor.get_slave_id(),
             motor.get_limit_param(),
-            q_open,
-            0.0,
-            0.0,
-            kp_open,
-            kd_open
+            q_open,     // q
+            0.0,        // dq
+            0.0,        // tau
+            4.0,        // kp
+            0.5         // kd
         );
 
         // send frame
@@ -772,19 +762,20 @@ void UlixArm::open(double d)
 
 void UlixArm::close()
 {
-    this->close(1.0);
+    this->close(0.5);   // default: close with half force
 }
 
 void UlixArm::close(double f)
 {
     if (f < 0.0 || f > 1.0)
     {
-        return;
+        throw std::out_of_range(
+            "Force factor limit exceeded. Accepted range [0,1], got " + std::to_string(f)
+        );
     }
-    
 
-    double tau_close_min = 0.2;
-    double tau_close_max = 1.2;
+    double tau_close_min = 0.2;     // min torque of motor to close gripper in Nm (from heuristic)
+    double tau_close_max = 1.2;     // min torque of motor to not break fingers in Nm (from heuristic)
     double tau_close = tau_close_min + f * (tau_close_max - tau_close_min);
 
     const auto& motor = this->motors_gripper[0];
@@ -816,4 +807,45 @@ void UlixArm::close(double f)
         );
         return;
     }
+}
+
+
+void UlixArm::check_gripper_joint_limits(double d_target)
+{
+    const auto& motor = this->motors_gripper[0];
+    const std::string joint_name = motor.get_joint_name();
+
+    // Get joint ID
+    const pinocchio::JointIndex joint_id =
+        this->pin_model.getJointId(joint_name);
+
+    if (joint_id == 0 || joint_id >= this->pin_model.njoints) 
+    {
+        throw std::out_of_range(
+            "Joint '" + joint_name + "' not found in Pinocchio model."
+        );
+    }
+
+    const auto &joint = this->pin_model.joints[joint_id];
+
+    // Check joint position limits
+    const auto q_idx = joint.idx_q();
+    const double d = d_target;
+
+    if (!std::isfinite(d)) 
+    {
+        throw std::runtime_error(
+            "Joint '" + joint_name + "' has a non-finite position."
+        );
+    }
+
+    if (d < this->pin_model.lowerPositionLimit[q_idx] ||
+        d > this->pin_model.upperPositionLimit[q_idx]) 
+    {
+        throw std::out_of_range(
+            "Joint '" + joint_name + "' position limit exceeded."
+        );
+    }
+
+    return;
 }

@@ -304,7 +304,14 @@ private:
      * @param dq_target Desired joint velocities, in rad/s.
      * @param tau_target Desired joint torques, in N·m.
      */
-    void check_joint_limits(Joints q_target, Joints dq_target, Joints tau_target);
+    void check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target);
+
+    /**
+     * @brief Checks that a command stays within the joint limits.
+     *
+     * @param d_target Desired opening of end effector, in meters.
+     */
+    void check_gripper_joint_limits(double d_target);
 
     /**
      * @brief Checks for self collisions.

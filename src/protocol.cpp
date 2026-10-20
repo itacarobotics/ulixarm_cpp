@@ -1,4 +1,4 @@
-#include "ulixarm_cpp/protocol.hpp"
+#include "protocol.hpp"
 
 #include <algorithm>
 

@@ -1,4 +1,4 @@
-#include "ulixarm_cpp/ulixarm.hpp"
+#include "ulixarm.hpp"
 
 
 UlixArm::UlixArm(bool gripper)

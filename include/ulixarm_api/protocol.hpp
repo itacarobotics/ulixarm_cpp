@@ -1,5 +1,4 @@
-#ifndef ULIXARM_CPP_PROTOCOL_HPP
-#define ULIXARM_CPP_PROTOCOL_HPP
+#pragma once
 
 #include <iostream>
 #include <stdint.h>
@@ -49,6 +48,3 @@ private:
     double   uint_to_double(uint16_t x, double xmin, double xmax, uint8_t bits);
 
 };
-
-
-#endif // ULIXARM_CPP_PROTOCOL_HPP

@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <chrono>
-#include "ulixarm_cpp/ulixarm.hpp"
+#include "ulixarm.hpp"
 
 int main()
 {

@@ -36,7 +36,9 @@ public:
         double q, double dq, double tau, double kp, double kd);
 
     // read
-    void parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload);
+    // returns true if the frame carries CAN data, false for bridge status frames (heartbeat, send ack)
+    bool parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload);
+    void check_motor_state(Payload payload);
     void decode_control_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos);
     
     const uint8_t head = 0xAA;

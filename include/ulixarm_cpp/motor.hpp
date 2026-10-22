@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <string>
+
 using MotorID = uint32_t;
 
 struct MotorLimitParam
@@ -48,9 +51,9 @@ private:
     MotorLimitParam limit_param;    
 
     std::string joint_name;
-    double q;
-    double dq;
-    double tau;
-    int trot;
-    int tmos;
+    double q{};
+    double dq{};
+    double tau{};
+    int trot{};
+    int tmos{};
 };

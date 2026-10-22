@@ -6,6 +6,7 @@
 #include <vector>
 #include <iomanip>
 #include <chrono>
+#include <cmath>
 
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
@@ -109,10 +110,14 @@ public:
      * the target position (kp), a damper tracking the target velocity (kd),
      * plus a feedforward torque on top. If gravity is true, the torque
      * needed to hold the arm up against gravity is added as well, so the
-     * gains don't have to fight the arm's own weight. The targets are
-     * checked against the joint limits and self collision before anything is sent.
+     * gains don't have to fight the arm's own weight. Before anything is sent,
+     * the targets and gains are checked against the joint limits, joints with
+     * kp > 0 must be within max_q_step of their current position, and no motor
+     * may exceed max_motor_temperature.
      * 
      * @note This method does not control the gripper, use open() and close() instead.
+     * 
+     * @warning Self collision is NOT checked yet.
      *
      * @param q_target Desired joint positions, in rad.
      * @param dq_target Desired joint velocities, in rad/s.
@@ -303,8 +308,39 @@ private:
      * @param q_target Desired joint positions, in radians.
      * @param dq_target Desired joint velocities, in rad/s.
      * @param tau_target Desired joint torques, in N·m.
+     * @param kp Position (stiffness) gains.
+     * @param kd Velocity (damping) gains.
      */
-    void check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target);
+    void check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target, Joints kp, Joints kd);
+
+    /**
+     * @brief Checks that position targets are close to the current position.
+     *
+     * Rejects targets further than max_q_step from the measured position on
+     * joints with a non-zero stiffness, to avoid violent jumps. Large motions
+     * must be interpolated by the caller.
+     *
+     * @param q_target Desired joint positions, in radians.
+     * @param kp Position (stiffness) gains.
+     */
+    void check_position_step(Joints q_target, Joints kp);
+
+    /**
+     * @brief Checks that no motor is overheating.
+     *
+     * Uses the temperatures from the last feedback received.
+     */
+    void check_motor_temperatures();
+
+    /**
+     * @brief Throws if the arm is not connected and enabled.
+     */
+    void check_enabled();
+
+    /**
+     * @brief Throws if no gripper is mounted.
+     */
+    void check_gripper_mounted();
 
     /**
      * @brief Checks that a command stays within the joint limits.
@@ -404,5 +440,17 @@ private:
      * be consumed. Defaults to 100 milliseconds.
      */
     const std::chrono::milliseconds max_motors_update_age{100};
+
+    /**
+     * @brief Maximum distance between a position target and the current position.
+     *
+     * Applies to joints commanded with kp > 0. In radians.
+     */
+    const double max_q_step{0.2};
+
+    /**
+     * @brief Maximum allowed MOSFET and rotor temperature, in degrees Celsius.
+     */
+    const int max_motor_temperature{80};
 
 };

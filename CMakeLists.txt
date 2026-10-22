@@ -17,6 +17,10 @@ add_library(ulixarm_core
     src/protocol.cpp
 )
 
+target_compile_definitions(ulixarm_core PRIVATE
+    ULIXARM_DESCRIPTION_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ulixarm_description/src/ulixarm_description"
+)
+
 set_target_properties(ulixarm_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )

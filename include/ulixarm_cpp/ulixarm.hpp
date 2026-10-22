@@ -267,25 +267,18 @@ private:
      *
      * @param motors The motors to refresh.
      */
-    void refresh_motors(const std::vector<Motor>& motors);
+    void refresh_motors(std::vector<Motor>& motors);
 
-    /**
-     * @brief Looks up a motor by its master ID.
-     *
-     * Used to match an incoming feedback message with the motor it came from.
-     *
-     * @param master_id The master ID reported in the message.
-     * @return A pointer to the matching motor, or nullptr if none matches.
-     */
-    Motor* find_motor_by_master_id(MotorID master_id);
-    
     /**
      * @brief Reads incoming feedback from the serial port.
      *
-     * Decodes the messages sent back by the motors and updates the stored
-     * state (position, velocity, torque and temperatures) of the matching motors.
+     * Reads frames until the feedback of the given motor arrives, skipping
+     * bridge status frames and stale frames from other motors, then updates
+     * the stored state (position, velocity, torque and temperatures) of the motor.
+     *
+     * @param motor The motor that was just commanded.
      */
-    void read_feedback();
+    void read_feedback(Motor& motor);
 
     /**
      * @brief Computes the torque needed to cancel gravity.

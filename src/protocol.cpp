@@ -201,7 +201,13 @@ bool DamiaoProtocol::parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_
     }
     }
 
-    // frame.data[2] -> can data length
+    // frame.data[2] -> can data length, payload is always decoded as 8 bytes
+    if (frame.data[2] != sizeof(payload.data))
+    {
+        throw std::runtime_error(
+            "Invalid serial frame: unexpected CAN data length " + std::to_string(frame.data[2])
+        );
+    }
     
     // Master ID fed back from the motor
     master_id = static_cast<uint32_t>(frame.data[3])

@@ -1,5 +1,7 @@
 #include "ulixarm.hpp"
 
+#include <algorithm>
+
 
 UlixArm::UlixArm(bool gripper)
 {
@@ -204,9 +206,9 @@ void UlixArm::disable()
 }
 
 
-void UlixArm::refresh_motors(const std::vector<Motor>& motors)
+void UlixArm::refresh_motors(std::vector<Motor>& motors)
 {
-    for (const auto& motor : motors) {
+    for (auto& motor : motors) {
 
         try
         {
@@ -216,11 +218,12 @@ void UlixArm::refresh_motors(const std::vector<Motor>& motors)
                 motor.get_slave_id()
             );
     
-            // send frame
+            // drop stale frames, then send frame
+            this->port.flush_input();
             this->port.write(send_frame.data, sizeof(send_frame.data));
             
             // read response
-            this->read_feedback();
+            this->read_feedback(motor);
         }
         catch(...)
         {
@@ -289,7 +292,7 @@ void UlixArm::control(
     // send commands
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
         
-        const auto& motor = this->motors_manipulator[i];
+        auto& motor = this->motors_manipulator[i];
 
         try
         {
@@ -305,11 +308,12 @@ void UlixArm::control(
                 kd[i]
             );
     
-            // send frame
+            // drop stale frames, then send frame
+            this->port.flush_input();
             this->port.write(send_frame.data, sizeof(send_frame.data));
     
             // read response
-            this->read_feedback();
+            this->read_feedback(motor);
         }
         catch(...)
         {
@@ -345,16 +349,16 @@ void UlixArm::hold()
 }
 
 
-void UlixArm::read_feedback()
+void UlixArm::read_feedback(Motor& motor)
 {
-    // bridge status frames (heartbeat, send ack) carry no motor data
-    constexpr int max_status_frames = 8;
+    // bridge status frames (heartbeat, send ack) and frames from other motors are skipped
+    constexpr int max_skipped_frames = 8;
 
     MotorID master_id;
     Payload payload;
-    bool has_can_data = false;
+    bool found = false;
 
-    for (int i = 0; i <= max_status_frames && !has_can_data; ++i)
+    for (int i = 0; i <= max_skipped_frames && !found; ++i)
     {
         // read raw bytes from port
         ReceiveFrame receive_frame;
@@ -375,25 +379,19 @@ void UlixArm::read_feedback()
         }
         
         // parse master id and payload
-        has_can_data = this->protocol.parse_usb_bridge_frame(
+        const bool has_can_data = this->protocol.parse_usb_bridge_frame(
             receive_frame,
             master_id,
             payload
         );
+
+        found = has_can_data && master_id == motor.get_master_id();
     }
 
-    if (!has_can_data)
-    {
-        throw std::runtime_error("No motor feedback received.");
-    }
-
-    // find motor the feedback belongs to
-    Motor* motor = this->find_motor_by_master_id(master_id);
-    
-    if (motor == nullptr)
+    if (!found)
     {
         throw std::runtime_error(
-            "Received feedback from unknown motor with master id " + std::to_string(master_id)
+            "No feedback received from motor " + motor.get_joint_name()
         );
     }
 
@@ -405,12 +403,12 @@ void UlixArm::read_feedback()
     catch(...)
     {
         std::throw_with_nested(
-            std::runtime_error("Motor fault on " + motor->get_joint_name())
+            std::runtime_error("Motor fault on " + motor.get_joint_name())
         );
     }
 
     // decode payload
-    MotorLimitParam limit_param = motor->get_limit_param();
+    MotorLimitParam limit_param = motor.get_limit_param();
 
     double q, dq, tau;
     int trot, tmos;
@@ -422,11 +420,11 @@ void UlixArm::read_feedback()
     );
 
     // update internal state
-    motor->set_q(q);
-    motor->set_dq(dq);
-    motor->set_tau(tau);
-    motor->set_trot(trot);
-    motor->set_tmos(tmos);
+    motor.set_q(q);
+    motor.set_dq(dq);
+    motor.set_tau(tau);
+    motor.set_trot(trot);
+    motor.set_tmos(tmos);
 
     return;
 }
@@ -525,24 +523,6 @@ Joints UlixArm::get_trot()
     }
     return trot;
 }
-
-Motor* UlixArm::find_motor_by_master_id(MotorID master_id)
-{
-    for (auto& motor : this->motors_manipulator) {
-        if (motor.get_master_id() == master_id) {
-            return &motor;
-        }
-    }
-
-    for (auto& motor : this->motors_gripper) {
-        if (motor.get_master_id() == master_id) {
-            return &motor;
-        }
-    }
-
-    return nullptr;
-}
-
 
 Joints UlixArm::compute_tau_gravity(Joints q)
 {
@@ -799,7 +779,7 @@ double UlixArm::gripper_ik(double d)
         / (2.0 * l1);
 
     // Protect acos() against floating-point roundoff.
-    double Q = K / R;
+    double Q = std::clamp(K / R, -1.0, 1.0);
 
     // Select the solution branch satisfying -1.5 <= th1 <= 0.
     const double th1 = std::atan2(e, A) - std::acos(Q);
@@ -829,7 +809,7 @@ void UlixArm::open(double d)
     // compute angle of motor -> motor angle is zero for opening zero.
     double q_open = this->gripper_ik(0.0) - this->gripper_ik(d_half);
     
-    const auto& motor = this->motors_gripper[0];
+    auto& motor = this->motors_gripper[0];
     
     try
     {
@@ -845,11 +825,12 @@ void UlixArm::open(double d)
             0.5         // kd
         );
 
-        // send frame
+        // drop stale frames, then send frame
+        this->port.flush_input();
         this->port.write(send_frame.data, sizeof(send_frame.data));
 
         // read response
-        this->read_feedback();
+        this->read_feedback(motor);
     }
     catch(...)
     {
@@ -882,7 +863,7 @@ void UlixArm::close(double f)
     double tau_close_max = 1.2;     // min torque of motor to not break fingers in Nm (from heuristic)
     double tau_close = tau_close_min + f * (tau_close_max - tau_close_min);
 
-    const auto& motor = this->motors_gripper[0];
+    auto& motor = this->motors_gripper[0];
 
     try
     {
@@ -898,11 +879,12 @@ void UlixArm::close(double f)
             0.1
         );
 
-        // send frame
+        // drop stale frames, then send frame
+        this->port.flush_input();
         this->port.write(send_frame.data, sizeof(send_frame.data));
 
         // read response
-        this->read_feedback();
+        this->read_feedback(motor);
     }
     catch(...)
     {

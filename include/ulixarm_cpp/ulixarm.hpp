@@ -446,11 +446,11 @@ private:
      *
      * Applies to joints commanded with kp > 0. In radians.
      */
-    const double max_q_step{0.2};
+    const double max_q_step{0.1};
 
     /**
      * @brief Maximum allowed MOSFET and rotor temperature, in degrees Celsius.
      */
-    const int max_motor_temperature{80};
+    const int max_motor_temperature{90};
 
 };

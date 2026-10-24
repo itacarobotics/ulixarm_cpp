@@ -202,15 +202,24 @@ public:
     void open();
 
     /**
-     * @brief Opens the gripper to a specific width.
+     * @brief Opens the gripper to a specific width or normalized position.
      *
-     * @param d Desired opening of the gripper in meters. Values beyond what the
-     *          gripper can physically do are limited to its range. 
-     *          Minimum opening is 0.0 meters.
-     *          Maximum opening is 0.090 meters.
+     * @param d Desired opening of the gripper. The interpretation depends on
+     *          the type parameter:
+     *          - If type is "metric", d specifies the opening in meters,
+     *            from 0.0 (closed) to 0.090 (fully open).
+     *          - If type is "normal", d specifies the normalized opening,
+     *            from 0.0 (closed) to 1.0 (fully open).
+     *          Values outside the valid range are limited to the gripper's
+     *          physical range.
+     *
+     * @param type Specifies the opening mode:
+     *             - "metric": Opening is specified in meters.
+     *             - "normal": Opening is specified as a normalized value
+     *               between 0.0 (closed) and 1.0 (fully open).
      */
     void open(double d, std::string type);
-
+    
     /**
      * @brief Closes the gripper.
      *

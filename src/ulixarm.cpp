@@ -537,7 +537,7 @@ Joints UlixArm::compute_tau_gravity(Joints q)
     }
 
     Eigen::VectorXd tau_full =
-       pinocchio::computeGeneralizedGravity(
+        pinocchio::computeGeneralizedGravity(
             this->pin_model,
             this->pin_data,
             q_full

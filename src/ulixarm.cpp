@@ -29,23 +29,7 @@ UlixArm::UlixArm(bool gripper)
     try
     {
         pinocchio::urdf::buildModel(urdf_path, this->pin_model);
-
         this->pin_data = pinocchio::Data(this->pin_model);
-
-        // // Resolve package://ulixarm_description/... paths
-        // const std::vector<std::string> package_dirs = {
-        //     package_path
-        // };
-
-        // pinocchio::urdf::buildGeom(
-        //     this->pin_model,
-        //     urdf_path,
-        //     pinocchio::COLLISION,
-        //     this->pin_collision_model,
-        //     package_dirs
-        // );
-
-        // this->pin_collision_data = pinocchio::GeometryData(this->pin_collision_model);
     }
     catch(...)
     {
@@ -145,12 +129,14 @@ void UlixArm::enable()
     default:
         break;
     }
-    
+
     // enable motors by group
     this->enable_motors(this->motors_manipulator);
     this->enable_motors(this->motors_gripper);
 
     this->status = UlixArmStatus::ENABLED;
+
+    this->refresh();
     return;
 }
 
@@ -240,7 +226,7 @@ void UlixArm::refresh_motors(std::vector<Motor>& motors)
 void UlixArm::refresh()
 {
     // check status
-    this->check_enabled();
+    this->check_robot_enabled();
 
     // refresh motors by group
     this->refresh_motors(this->motors_manipulator);
@@ -263,7 +249,7 @@ void UlixArm::control(
 )
 {
     // check status
-    this->check_enabled();
+    this->check_robot_enabled();
 
     // compute tau gravity
     if (gravity)
@@ -277,7 +263,7 @@ void UlixArm::control(
     {
         this->check_manipulator_joint_limits(q_target, dq_target, tau_target, kp, kd);
         this->check_position_step(q_target, kp);
-        this->check_self_collision(q_target);
+        this->check_motor_temperatures();
     }
     catch(...)
     {
@@ -285,9 +271,6 @@ void UlixArm::control(
             std::runtime_error("Invalid target command.")
         );
     }
-
-    // check motor temperatures
-    this->check_motor_temperatures();
 
     // send commands
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
@@ -358,7 +341,7 @@ void UlixArm::read_feedback(Motor& motor)
     Payload payload;
     bool found = false;
 
-    for (int i = 0; i <= max_skipped_frames && !found; ++i)
+    for (int i = 0; i <= max_skipped_frames; ++i)
     {
         // read raw bytes from port
         ReceiveFrame receive_frame;
@@ -385,9 +368,12 @@ void UlixArm::read_feedback(Motor& motor)
             payload
         );
 
-        found = has_can_data && master_id == motor.get_master_id();
-    }
+        found = has_can_data && (master_id == motor.get_master_id());
+        if (found)
+            break;
 
+    }
+    
     if (!found)
     {
         throw std::runtime_error(
@@ -677,7 +663,7 @@ void UlixArm::check_motor_temperatures()
 }
 
 
-void UlixArm::check_enabled()
+void UlixArm::check_robot_enabled()
 {
     switch (this->status)
     {
@@ -703,46 +689,6 @@ void UlixArm::check_gripper_mounted()
     }
 }
 
-
-void UlixArm::check_self_collision(Joints q_target)
-{
-    // @todo self collision check is not implemented yet.
-    // // Construct Pinocchio configuration vector.
-    // Eigen::VectorXd q = Eigen::VectorXd::Zero(this->pin_model.nq);
-
-    // // Map target joint values to Pinocchio configuration indices.
-    // for (size_t i=0; i<q_target.size(); i++)
-    // {
-    //     const pinocchio::JointIndex joint_id = static_cast<pinocchio::JointIndex>(i + 1);
-
-    //     if (joint_id >= this->pin_model.njoints)
-    //     {
-    //         throw std::runtime_error(
-    //             "Joint index exceeds Pinocchio model size"
-    //         );
-    //     }
-
-    //     q[this->pin_model.idx_qs[joint_id]] = q_target[i];
-    // }
-
-    // // Update collision geometry placements.
-    // pinocchio::updateGeometryPlacements(
-    //     this->pin_model,
-    //     this->pin_data,
-    //     this->pin_collision_model,
-    //     this->pin_collision_data,
-    //     q
-    // );
-
-    // // Check registered collision pairs.
-    // for (std::size_t i = 0; i < this->pin_collision_model.collisionPairs.size(); i++)
-    // {
-    //     if (this->pin_collision_data.collisionResults[i].isCollision())
-    //     {
-    //         throw std::runtime_error("Collision detected");
-    //     }
-    // }
-}
 
 void UlixArm::log_errors(const std::exception& e, int level)
 {
@@ -790,18 +736,29 @@ double UlixArm::gripper_ik(double d)
 
 void UlixArm::open()
 {
-    double d_open = 0.080; // default: not fully open
-    this->open(d_open);
+    this->open(0.8, "normal");
 }
 
 
-void UlixArm::open(double d)
+void UlixArm::open(double d, std::string type)
 {
     this->check_gripper_mounted();
-    this->check_enabled();
+    this->check_robot_enabled();
 
-    // finger joint moves half the opening
-    double d_half = d / 2.0;
+    double d_half;
+    if (type == "metric")
+    {
+        // finger joint moves half the opening
+        d_half = d / 2.0;
+    }
+    else if (type == "normal")
+    {
+        d_half = (d * this->max_gripper_opening) / 2.0;
+    }
+    else
+    {
+        throw std::invalid_argument("Invalid argument. Should be one of [\"metric\", \"normal\"]");
+    }
 
     // throw if joint limits exceed
     this->check_gripper_joint_limits(d_half);
@@ -849,7 +806,7 @@ void UlixArm::close()
 void UlixArm::close(double f)
 {
     this->check_gripper_mounted();
-    this->check_enabled();
+    this->check_robot_enabled();
 
     // negated comparison so that NaN fails the check
     if (!(f >= 0.0 && f <= 1.0))

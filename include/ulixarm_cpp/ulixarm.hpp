@@ -209,7 +209,7 @@ public:
      *          Minimum opening is 0.0 meters.
      *          Maximum opening is 0.090 meters.
      */
-    void open(double d);
+    void open(double d, std::string type);
 
     /**
      * @brief Closes the gripper.
@@ -328,7 +328,7 @@ private:
     /**
      * @brief Throws if the arm is not connected and enabled.
      */
-    void check_enabled();
+    void check_robot_enabled();
 
     /**
      * @brief Throws if no gripper is mounted.
@@ -445,5 +445,7 @@ private:
      * @brief Maximum allowed MOSFET and rotor temperature, in degrees Celsius.
      */
     const int max_motor_temperature{90};
+
+    const double max_gripper_opening{0.090};
 
 };

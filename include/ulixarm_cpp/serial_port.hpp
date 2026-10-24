@@ -144,40 +144,43 @@ public:
         if (data == nullptr)
             throw std::invalid_argument("Read buffer cannot be null.");
 
-        size_t budget = max_scan_factor * len;
-        size_t bytes_read = 0;
         uint8_t byte;
+        size_t max_iterations = this->max_scan_factor * len;
+        size_t iteration = 0;
 
-        while (true)
+        // Read bytes until the header is found.
+        while(true)
         {
-            // Fill the frame, skipping bytes until the header is found.
-            while (bytes_read < len)
-            {
-                if (budget == 0)
-                {
-                    throw std::runtime_error(
-                        "Invalid serial frame: no valid frame found."
-                    );
-                }
+            this->wait_for_byte(&byte);
 
-                this->wait_for_byte(&byte);
-                budget -= 1;
+            if (byte == head)
+                break;
 
-                if (bytes_read == 0 && byte != head)
-                    continue;
+            if (iteration > max_iterations)
+                throw std::runtime_error("Could not find head byte, aborting read.");    
 
-                data[bytes_read] = byte;
-                bytes_read += 1;
-            }
+            iteration++;
+        }
 
-            // Check whether the last byte matches the expected tail.
-            if (data[len - 1] == tail)
-                return;
+        size_t bytes_read = 0;
+        data[bytes_read] = head;
+        bytes_read += 1;
 
-            // Resync: restart from the next header byte inside the frame.
-            uint8_t* next_head = std::find(data + 1, data + len, head);
-            bytes_read = static_cast<size_t>((data + len) - next_head);
-            std::copy(next_head, data + len, data);
+        // Read the remaining bytes.
+        while (bytes_read < len)
+        {
+            this->wait_for_byte(&byte);
+
+            data[bytes_read] = byte;
+            bytes_read += 1;
+        }
+
+        // Check whether the last byte matches the expected tail.
+        if (data[bytes_read - 1] != tail)
+        {
+            throw std::runtime_error(
+                "Invalid serial frame: unexpected tail byte."
+            );
         }
     }
 

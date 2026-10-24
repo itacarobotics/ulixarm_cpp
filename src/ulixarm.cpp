@@ -1,5 +1,7 @@
 #include "ulixarm.hpp"
 
+#include <algorithm>
+
 
 UlixArm::UlixArm(bool gripper)
 {
@@ -204,9 +206,9 @@ void UlixArm::disable()
 }
 
 
-void UlixArm::refresh_motors(const std::vector<Motor>& motors)
+void UlixArm::refresh_motors(std::vector<Motor>& motors)
 {
-    for (const auto& motor : motors) {
+    for (auto& motor : motors) {
 
         try
         {
@@ -216,11 +218,12 @@ void UlixArm::refresh_motors(const std::vector<Motor>& motors)
                 motor.get_slave_id()
             );
     
-            // send frame
+            // drop stale frames, then send frame
+            this->port.flush_input();
             this->port.write(send_frame.data, sizeof(send_frame.data));
             
             // read response
-            this->read_feedback();
+            this->read_feedback(motor);
         }
         catch(...)
         {
@@ -237,19 +240,7 @@ void UlixArm::refresh_motors(const std::vector<Motor>& motors)
 void UlixArm::refresh()
 {
     // check status
-    switch (this->status)
-    {
-    case UlixArmStatus::IDLE:
-        throw std::runtime_error("Robot is not connected.");
-    case UlixArmStatus::DISABLED:
-    case UlixArmStatus::CONNECTED:
-        throw std::runtime_error("Robot is not enabled.");
-    case UlixArmStatus::ERROR:
-        throw std::runtime_error("Robot status error.");
-    case UlixArmStatus::ENABLED:
-    default:
-        break;
-    }
+    this->check_enabled();
 
     // refresh motors by group
     this->refresh_motors(this->motors_manipulator);
@@ -272,19 +263,7 @@ void UlixArm::control(
 )
 {
     // check status
-    switch (this->status)
-    {
-    case UlixArmStatus::IDLE:
-        throw std::runtime_error("Robot is not connected.");
-    case UlixArmStatus::DISABLED:
-    case UlixArmStatus::CONNECTED:
-        throw std::runtime_error("Robot is not enabled.");
-    case UlixArmStatus::ERROR:
-        throw std::runtime_error("Robot status error.");
-    case UlixArmStatus::ENABLED:
-    default:
-        break;
-    }
+    this->check_enabled();
 
     // compute tau gravity
     if (gravity)
@@ -296,7 +275,8 @@ void UlixArm::control(
     // check joint limits
     try
     {
-        this->check_manipulator_joint_limits(q_target, dq_target, tau_target);
+        this->check_manipulator_joint_limits(q_target, dq_target, tau_target, kp, kd);
+        this->check_position_step(q_target, kp);
         this->check_self_collision(q_target);
     }
     catch(...)
@@ -307,12 +287,12 @@ void UlixArm::control(
     }
 
     // check motor temperatures
-    // @todo
+    this->check_motor_temperatures();
 
     // send commands
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
         
-        const auto& motor = this->motors_manipulator[i];
+        auto& motor = this->motors_manipulator[i];
 
         try
         {
@@ -328,11 +308,12 @@ void UlixArm::control(
                 kd[i]
             );
     
-            // send frame
+            // drop stale frames, then send frame
+            this->port.flush_input();
             this->port.write(send_frame.data, sizeof(send_frame.data));
     
             // read response
-            this->read_feedback();
+            this->read_feedback(motor);
         }
         catch(...)
         {
@@ -368,39 +349,66 @@ void UlixArm::hold()
 }
 
 
-void UlixArm::read_feedback()
+void UlixArm::read_feedback(Motor& motor)
 {
-    // read raw bytes from port
-    ReceiveFrame receive_frame;
+    // bridge status frames (heartbeat, send ack) and frames from other motors are skipped
+    constexpr int max_skipped_frames = 8;
+
+    MotorID master_id;
+    Payload payload;
+    bool found = false;
+
+    for (int i = 0; i <= max_skipped_frames && !found; ++i)
+    {
+        // read raw bytes from port
+        ReceiveFrame receive_frame;
+        try
+        {
+            this->port.read(
+                receive_frame.data, 
+                this->protocol.head,
+                this->protocol.tail,
+                sizeof(receive_frame.data)
+            );
+        }
+        catch(...)
+        {
+            std::throw_with_nested(
+                std::runtime_error("Could not read feedback.")
+            );
+        }
+        
+        // parse master id and payload
+        const bool has_can_data = this->protocol.parse_usb_bridge_frame(
+            receive_frame,
+            master_id,
+            payload
+        );
+
+        found = has_can_data && master_id == motor.get_master_id();
+    }
+
+    if (!found)
+    {
+        throw std::runtime_error(
+            "No feedback received from motor " + motor.get_joint_name()
+        );
+    }
+
+    // check motor fault flags
     try
     {
-        this->port.read(
-            receive_frame.data, 
-            this->protocol.head,
-            this->protocol.tail,
-            sizeof(receive_frame.data)
-        );
+        this->protocol.check_motor_state(payload);
     }
     catch(...)
     {
         std::throw_with_nested(
-            std::runtime_error("Could not read feedback.")
+            std::runtime_error("Motor fault on " + motor.get_joint_name())
         );
-        return;
     }
-    
-    // parse master id and payload
-    MotorID master_id;
-    Payload payload;
-    this->protocol.parse_usb_bridge_frame(
-        receive_frame,
-        master_id,
-        payload
-    );
 
     // decode payload
-    Motor* motor = this->find_motor_by_master_id(master_id);
-    MotorLimitParam limit_param = motor->get_limit_param();
+    MotorLimitParam limit_param = motor.get_limit_param();
 
     double q, dq, tau;
     int trot, tmos;
@@ -412,11 +420,11 @@ void UlixArm::read_feedback()
     );
 
     // update internal state
-    motor->set_q(q);
-    motor->set_dq(dq);
-    motor->set_tau(tau);
-    motor->set_trot(trot);
-    motor->set_tmos(tmos);
+    motor.set_q(q);
+    motor.set_dq(dq);
+    motor.set_tau(tau);
+    motor.set_trot(trot);
+    motor.set_tmos(tmos);
 
     return;
 }
@@ -516,24 +524,6 @@ Joints UlixArm::get_trot()
     return trot;
 }
 
-Motor* UlixArm::find_motor_by_master_id(MotorID master_id)
-{
-    for (auto& motor : this->motors_manipulator) {
-        if (motor.get_master_id() == master_id) {
-            return &motor;
-        }
-    }
-
-    for (auto& motor : this->motors_gripper) {
-        if (motor.get_master_id() == master_id) {
-            return &motor;
-        }
-    }
-
-    return nullptr;
-}
-
-
 Joints UlixArm::compute_tau_gravity(Joints q)
 {
     Joints tau_gravity = Joints::Zero();
@@ -547,7 +537,7 @@ Joints UlixArm::compute_tau_gravity(Joints q)
     }
 
     Eigen::VectorXd tau_full =
-       pinocchio::computeGeneralizedGravity(
+        pinocchio::computeGeneralizedGravity(
             this->pin_model,
             this->pin_data,
             q_full
@@ -562,7 +552,7 @@ Joints UlixArm::compute_tau_gravity(Joints q)
 }
 
 
-void UlixArm::check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target)
+void UlixArm::check_manipulator_joint_limits(Joints q_target, Joints dq_target, Joints tau_target, Joints kp, Joints kd)
 {
     for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
         
@@ -606,7 +596,8 @@ void UlixArm::check_manipulator_joint_limits(Joints q_target, Joints dq_target, 
         const double max_dq = std::min(urdf_dq, limit_param.dq);
         const double dq = dq_target[i];
 
-        if (std::abs(dq) > max_dq) 
+        // negated comparison so that NaN fails the check
+        if (!(std::abs(dq) <= max_dq)) 
         {
             throw std::out_of_range(
                 "Joint '" + joint_name + "' velocity limit exceeded."
@@ -618,18 +609,104 @@ void UlixArm::check_manipulator_joint_limits(Joints q_target, Joints dq_target, 
         const double max_tau = std::min(urdf_tau, limit_param.tau);
         const double tau = tau_target[i];
 
-        if (std::abs(tau) > max_tau) 
+        if (!(std::abs(tau) <= max_tau)) 
         {
             throw std::out_of_range(
                 "Joint '" + joint_name + "' effort limit exceeded."
+            );
+        }
+
+        // Gains: range supported by the motor protocol
+        if (!(kp[i] >= 0.0 && kp[i] <= 500.0)) 
+        {
+            throw std::out_of_range(
+                "Joint '" + joint_name + "' kp out of range [0, 500]."
+            );
+        }
+
+        if (!(kd[i] >= 0.0 && kd[i] <= 5.0)) 
+        {
+            throw std::out_of_range(
+                "Joint '" + joint_name + "' kd out of range [0, 5]."
             );
         }
     }
 }
 
 
+void UlixArm::check_position_step(Joints q_target, Joints kp)
+{
+    // no stiffness -> target position has no effect
+    if ((kp.array() <= 0.0).all())
+        return;
+
+    const Joints q = this->get_q();
+
+    for (std::size_t i = 0; i < this->motors_manipulator.size(); ++i) {
+        
+        if (kp[i] > 0.0 && std::abs(q_target[i] - q[i]) > this->max_q_step)
+        {
+            throw std::out_of_range(
+                "Joint '" + this->motors_manipulator[i].get_joint_name() +
+                "' target is " + std::to_string(std::abs(q_target[i] - q[i])) +
+                " rad away from current position (max " + std::to_string(this->max_q_step) +
+                " rad). Interpolate the motion."
+            );
+        }
+    }
+}
+
+
+void UlixArm::check_motor_temperatures()
+{
+    for (const auto* motors : {&this->motors_manipulator, &this->motors_gripper}) {
+        for (const auto& motor : *motors) {
+            
+            if (motor.get_tmos() > this->max_motor_temperature ||
+                motor.get_trot() > this->max_motor_temperature)
+            {
+                throw std::runtime_error(
+                    "Motor '" + motor.get_joint_name() + "' overheating: MOS " +
+                    std::to_string(motor.get_tmos()) + " C, rotor " +
+                    std::to_string(motor.get_trot()) + " C (max " +
+                    std::to_string(this->max_motor_temperature) + " C)."
+                );
+            }
+        }
+    }
+}
+
+
+void UlixArm::check_enabled()
+{
+    switch (this->status)
+    {
+    case UlixArmStatus::IDLE:
+        throw std::runtime_error("Robot is not connected.");
+    case UlixArmStatus::DISABLED:
+    case UlixArmStatus::CONNECTED:
+        throw std::runtime_error("Robot is not enabled.");
+    case UlixArmStatus::ERROR:
+        throw std::runtime_error("Robot status error.");
+    case UlixArmStatus::ENABLED:
+    default:
+        break;
+    }
+}
+
+
+void UlixArm::check_gripper_mounted()
+{
+    if (!this->gripper || this->motors_gripper.empty())
+    {
+        throw std::runtime_error("No gripper mounted.");
+    }
+}
+
+
 void UlixArm::check_self_collision(Joints q_target)
 {
+    // @todo self collision check is not implemented yet.
     // // Construct Pinocchio configuration vector.
     // Eigen::VectorXd q = Eigen::VectorXd::Zero(this->pin_model.nq);
 
@@ -702,7 +779,7 @@ double UlixArm::gripper_ik(double d)
         / (2.0 * l1);
 
     // Protect acos() against floating-point roundoff.
-    double Q = K / R;
+    double Q = std::clamp(K / R, -1.0, 1.0);
 
     // Select the solution branch satisfying -1.5 <= th1 <= 0.
     const double th1 = std::atan2(e, A) - std::acos(Q);
@@ -720,6 +797,9 @@ void UlixArm::open()
 
 void UlixArm::open(double d)
 {
+    this->check_gripper_mounted();
+    this->check_enabled();
+
     // finger joint moves half the opening
     double d_half = d / 2.0;
 
@@ -729,7 +809,7 @@ void UlixArm::open(double d)
     // compute angle of motor -> motor angle is zero for opening zero.
     double q_open = this->gripper_ik(0.0) - this->gripper_ik(d_half);
     
-    const auto& motor = this->motors_gripper[0];
+    auto& motor = this->motors_gripper[0];
     
     try
     {
@@ -745,11 +825,12 @@ void UlixArm::open(double d)
             0.5         // kd
         );
 
-        // send frame
+        // drop stale frames, then send frame
+        this->port.flush_input();
         this->port.write(send_frame.data, sizeof(send_frame.data));
 
         // read response
-        this->read_feedback();
+        this->read_feedback(motor);
     }
     catch(...)
     {
@@ -767,7 +848,11 @@ void UlixArm::close()
 
 void UlixArm::close(double f)
 {
-    if (f < 0.0 || f > 1.0)
+    this->check_gripper_mounted();
+    this->check_enabled();
+
+    // negated comparison so that NaN fails the check
+    if (!(f >= 0.0 && f <= 1.0))
     {
         throw std::out_of_range(
             "Force factor limit exceeded. Accepted range [0,1], got " + std::to_string(f)
@@ -778,7 +863,7 @@ void UlixArm::close(double f)
     double tau_close_max = 1.2;     // min torque of motor to not break fingers in Nm (from heuristic)
     double tau_close = tau_close_min + f * (tau_close_max - tau_close_min);
 
-    const auto& motor = this->motors_gripper[0];
+    auto& motor = this->motors_gripper[0];
 
     try
     {
@@ -794,11 +879,12 @@ void UlixArm::close(double f)
             0.1
         );
 
-        // send frame
+        // drop stale frames, then send frame
+        this->port.flush_input();
         this->port.write(send_frame.data, sizeof(send_frame.data));
 
         // read response
-        this->read_feedback();
+        this->read_feedback(motor);
     }
     catch(...)
     {
@@ -812,6 +898,8 @@ void UlixArm::close(double f)
 
 void UlixArm::check_gripper_joint_limits(double d_target)
 {
+    this->check_gripper_mounted();
+
     const auto& motor = this->motors_gripper[0];
     const std::string joint_name = motor.get_joint_name();
 

@@ -2,10 +2,12 @@
 
 #include <libserialport.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 class SerialPort
 {
@@ -14,11 +16,27 @@ public:
 
     ~SerialPort()
     {
-        if (this->port_ != nullptr)
+        this->release();
+    }
+
+    // owns the port handle -> not copyable, only movable
+    SerialPort(const SerialPort&) = delete;
+    SerialPort& operator=(const SerialPort&) = delete;
+
+    SerialPort(SerialPort&& other) noexcept
+        : port_(std::exchange(other.port_, nullptr)),
+          timeout_ms_(other.timeout_ms_)
+    { }
+
+    SerialPort& operator=(SerialPort&& other) noexcept
+    {
+        if (this != &other)
         {
-            sp_close(this->port_);
-            sp_free_port(this->port_);
+            this->release();
+            this->port_ = std::exchange(other.port_, nullptr);
+            this->timeout_ms_ = other.timeout_ms_;
         }
+        return *this;
     }
 
     void init(const char* port, unsigned int baudrate, unsigned int timeout_ms)
@@ -90,50 +108,76 @@ public:
         }
     }
 
-    void read(uint8_t* data, uint8_t head, uint8_t tail, ssize_t len)
+    /**
+     * Discards bytes received but not read yet, e.g. stale frames.
+     */
+    void flush_input()
     {
         if (this->port_ == nullptr)
             throw std::runtime_error("Port is not open.");
 
-        if (len <= 0)
+        if (sp_flush(this->port_, SP_BUF_INPUT) != SP_OK)
+        {
+            throw std::runtime_error(
+                "Failed to flush serial port input."
+            );
+        }
+    }
+
+    /**
+     * Reads one frame of len bytes starting with head and ending with tail.
+     * 
+     * Bytes before the header are skipped. On a tail mismatch, the search 
+     * restarts from the next header byte inside the frame. Gives up after 
+     * max_scan_factor * len bytes so that a noisy line cannot block forever.
+     */
+    void read(uint8_t* data, uint8_t head, uint8_t tail, size_t len)
+    {
+        if (this->port_ == nullptr)
+            throw std::runtime_error("Port is not open.");
+
+        if (len < 2)
             throw std::invalid_argument(
-                "Read length must be greater than zero."
+                "Read length must be at least 2 (head and tail)."
             );
 
         if (data == nullptr)
             throw std::invalid_argument("Read buffer cannot be null.");
 
-        int rc;
+        size_t budget = max_scan_factor * len;
+        size_t bytes_read = 0;
         uint8_t byte;
-        ssize_t bytes_read = 0;
 
-        // Read bytes until the header is found.
         while (true)
         {
-            this->wait_for_byte(&byte);
+            // Fill the frame, skipping bytes until the header is found.
+            while (bytes_read < len)
+            {
+                if (budget == 0)
+                {
+                    throw std::runtime_error(
+                        "Invalid serial frame: no valid frame found."
+                    );
+                }
 
-            if (byte == head)
-                break;
-        }
+                this->wait_for_byte(&byte);
+                budget -= 1;
 
-        data[bytes_read] = head;
-        bytes_read += 1;
+                if (bytes_read == 0 && byte != head)
+                    continue;
 
-        // Read the remaining bytes.
-        while (bytes_read < len)
-        {
-            this->wait_for_byte(&byte);
+                data[bytes_read] = byte;
+                bytes_read += 1;
+            }
 
-            data[bytes_read] = byte;
-            bytes_read += 1;
-        }
+            // Check whether the last byte matches the expected tail.
+            if (data[len - 1] == tail)
+                return;
 
-        // Check whether the last byte matches the expected tail.
-        if (data[bytes_read - 1] != tail)
-        {
-            throw std::runtime_error(
-                "Invalid serial frame: unexpected tail byte."
-            );
+            // Resync: restart from the next header byte inside the frame.
+            uint8_t* next_head = std::find(data + 1, data + len, head);
+            bytes_read = static_cast<size_t>((data + len) - next_head);
+            std::copy(next_head, data + len, data);
         }
     }
 
@@ -204,6 +248,18 @@ private:
             );
         }
     }
+
+    void release()
+    {
+        if (this->port_ != nullptr)
+        {
+            sp_close(this->port_);
+            sp_free_port(this->port_);
+            this->port_ = nullptr;
+        }
+    }
+
+    static constexpr size_t max_scan_factor = 4;
 
     struct sp_port* port_ = nullptr;
     unsigned int timeout_ms_ = 0;

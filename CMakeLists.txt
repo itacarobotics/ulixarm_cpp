@@ -5,7 +5,13 @@ project(ulixarm_cpp LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+# MSVC needs C++20 for designated initializers
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 20)
+endif()
+
+# no version: Eigen 3.4 rejects ranges and conda-forge pinocchio (Windows) needs Eigen 5
+find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(PkgConfig REQUIRED)
 find_package(pinocchio REQUIRED)
 

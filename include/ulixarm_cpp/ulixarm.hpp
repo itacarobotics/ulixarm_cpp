@@ -51,8 +51,9 @@ public:
      * for that.
      *
      * @param gripper Set to true if a gripper is mounted on the arm, false if not.
+     * @param urdf_path Path to the robot URDF. Leave empty to use the one in ulixarm_description.
      */
-    UlixArm(bool gripper=true);
+    UlixArm(bool gripper=true, const std::string& urdf_path="");
     
     /**
      * @brief Cleans up when the arm object goes away.

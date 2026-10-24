@@ -3,7 +3,7 @@
 #include <algorithm>
 
 
-UlixArm::UlixArm(bool gripper)
+UlixArm::UlixArm(bool gripper, const std::string& urdf_path)
 {
     // save config
     this->gripper = gripper;
@@ -23,12 +23,13 @@ UlixArm::UlixArm(bool gripper)
     this->motors_manipulator.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "joint6"); // DM4310
     
     // create pinocchio model and data
-    const std::string package_path = ULIXARM_DESCRIPTION_PATH;
-    const std::string urdf_path = package_path + "/urdf/robot.urdf";
+    const std::string model_path = urdf_path.empty()
+        ? std::string(ULIXARM_DESCRIPTION_PATH) + "/urdf/robot.urdf"
+        : urdf_path;
 
     try
     {
-        pinocchio::urdf::buildModel(urdf_path, this->pin_model);
+        pinocchio::urdf::buildModel(model_path, this->pin_model);
         this->pin_data = pinocchio::Data(this->pin_model);
     }
     catch(...)

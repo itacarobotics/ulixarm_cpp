@@ -21,7 +21,7 @@ UlixArm::UlixArm(bool gripper)
     this->motors_manipulator.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "joint6"); // DM4310
     
     // create pinocchio model and data
-    const std::string package_path = "ulixarm_description/src/ulixarm_description";
+    const std::string package_path = ULIXARM_DESCRIPTION_PATH;
     const std::string urdf_path = package_path + "/urdf/robot.urdf";
 
     try

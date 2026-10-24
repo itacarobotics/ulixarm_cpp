@@ -1,4 +1,4 @@
 [submodule "ulixarm_description"]
 	path = ulixarm_description
-	url = git@github.com:itacarobotics/ulixarm_description.git
+	url = ../ulixarm_description.git
 	branch = main

@@ -5,7 +5,7 @@ project(ulixarm_cpp LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(PkgConfig REQUIRED)
 find_package(pinocchio REQUIRED)
 

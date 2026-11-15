@@ -6,7 +6,10 @@
 #include <stdexcept>
 #include <string>
 
-SendFrame DamiaoProtocol::build_usb_bridge_frame(MotorID can_id, Payload can_payload)
+namespace ulixarm
+{
+
+SendFrame DamiaoProtocol::build_usb_bridge_frame(MotorID can_id, const Payload& can_payload) const
 {
     SendFrame send_frame;
     
@@ -69,10 +72,9 @@ SendFrame DamiaoProtocol::build_usb_bridge_frame(MotorID can_id, Payload can_pay
     send_frame.data[29] = 0x00;
 
     return send_frame;
-
 }
 
-SendFrame DamiaoProtocol::encode_enable_command(MotorID slave_id)
+SendFrame DamiaoProtocol::encode_enable_command(MotorID slave_id) const
 {
     // build can data
     Payload payload;
@@ -88,7 +90,7 @@ SendFrame DamiaoProtocol::encode_enable_command(MotorID slave_id)
     return this->build_usb_bridge_frame(slave_id, payload);
 }
 
-SendFrame DamiaoProtocol::encode_disable_command(MotorID slave_id)
+SendFrame DamiaoProtocol::encode_disable_command(MotorID slave_id) const
 {
     // build can data
     Payload payload;
@@ -104,7 +106,7 @@ SendFrame DamiaoProtocol::encode_disable_command(MotorID slave_id)
     return this->build_usb_bridge_frame(slave_id, payload);
 }
 
-SendFrame DamiaoProtocol::encode_refresh_command(MotorID slave_id)
+SendFrame DamiaoProtocol::encode_refresh_command(MotorID slave_id) const
 {
     MotorID query_id = 0x7FF;
 
@@ -123,15 +125,15 @@ SendFrame DamiaoProtocol::encode_refresh_command(MotorID slave_id)
 }
 
 
-SendFrame DamiaoProtocol::encode_control_command(MotorID slave_id, MotorLimitParam limit_param, 
-    double q, double dq, double tau, double kp, double kd)
+SendFrame DamiaoProtocol::encode_control_command(MotorID slave_id, const MotorLimitParam& limit_param,
+    double q, double dq, double tau, double kp, double kd) const
 {
     // map linearly to given bounds
     uint16_t q_uint = double_to_uint(q, -limit_param.q, limit_param.q, 16);
     uint16_t dq_uint = double_to_uint(dq, -limit_param.dq, limit_param.dq, 12);
     uint16_t tau_uint = double_to_uint(tau, -limit_param.tau, limit_param.tau, 12);
-    uint16_t kp_uint = double_to_uint(kp, 0, 500, 12);
-    uint16_t kd_uint = double_to_uint(kd, 0, 5, 12);
+    uint16_t kp_uint = double_to_uint(kp, 0, kp_max, 12);
+    uint16_t kd_uint = double_to_uint(kd, 0, kd_max, 12);
 
     // build can data
     Payload payload;
@@ -147,8 +149,19 @@ SendFrame DamiaoProtocol::encode_control_command(MotorID slave_id, MotorLimitPar
     return this->build_usb_bridge_frame(slave_id, payload);
 }
 
+SendFrame DamiaoProtocol::encode_read_register_command(MotorID slave_id, MotorRegister rid) const
+{
+    Payload payload;
+    payload.data[0] = slave_id & 0xFF;
+    payload.data[1] = (slave_id >> 8) & 0xFF;
+    payload.data[2] = 0x33; // read register
+    payload.data[3] = static_cast<uint8_t>(rid);
+
+    return this->build_usb_bridge_frame(0x7FF, payload);
+}
+
 // read
-bool DamiaoProtocol::parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_id, Payload &payload)
+bool DamiaoProtocol::parse_usb_bridge_frame(const ReceiveFrame& frame, MotorID &master_id, Payload &payload) const
 {
     // frame.data[0] -> header
     
@@ -230,7 +243,7 @@ bool DamiaoProtocol::parse_usb_bridge_frame(ReceiveFrame frame, MotorID &master_
     return true;
 }
 
-void DamiaoProtocol::check_motor_state(Payload payload)
+void DamiaoProtocol::check_motor_state(const Payload& payload, bool expect_enabled) const
 {
     // payload.data[0] -> slave id (low nibble) | state (high nibble)
     // State    0x0: disabled
@@ -247,6 +260,9 @@ void DamiaoProtocol::check_motor_state(Payload payload)
     switch (state)
     {
     case 0x0:
+        if (expect_enabled)
+            throw std::runtime_error("Motor error: motor reports disabled while arm is enabled.");
+        return;
     case 0x1:
         return;
     case 0x8:
@@ -270,20 +286,19 @@ void DamiaoProtocol::check_motor_state(Payload payload)
     }
 }
 
-void DamiaoProtocol::decode_control_feedback(Payload payload, MotorLimitParam limit_param, double &q, double &dq, double &tau, int &trot, int &tmos)
+void DamiaoProtocol::decode_control_feedback(const Payload& payload, const MotorLimitParam& limit_param,
+    double &q, double &dq, double &tau, int &trot, int &tmos) const
 {
     uint16_t q_uint = (uint16_t(payload.data[1]) << 8) | payload.data[2];
     uint16_t dq_uint = (uint16_t(payload.data[3]) << 4) | (payload.data[4] >> 4);
     uint16_t tau_uint = (uint16_t(payload.data[4] & 0xf) << 8) | payload.data[5];
     
-    q   = this->uint_to_double(q_uint, -limit_param.q, limit_param.q, 16);
-    dq  = this->uint_to_double(dq_uint, -limit_param.dq, limit_param.dq, 12);
-    tau = this->uint_to_double(tau_uint, -limit_param.tau, limit_param.tau, 12);
+    q   = uint_to_double(q_uint, -limit_param.q, limit_param.q, 16);
+    dq  = uint_to_double(dq_uint, -limit_param.dq, limit_param.dq, 12);
+    tau = uint_to_double(tau_uint, -limit_param.tau, limit_param.tau, 12);
     
     tmos = static_cast<int>(payload.data[6]);
     trot = static_cast<int>(payload.data[7]);
-
-    return;
 }
 
 
@@ -307,3 +322,22 @@ double DamiaoProtocol::uint_to_double(uint16_t x, double xmin, double xmax, uint
     double data = data_norm * span + xmin;
     return data;
 }
+
+
+bool DamiaoProtocol::decode_register_reply(const Payload& payload, MotorID slave_id, MotorRegister rid, uint32_t &raw) const
+{
+    // reply echoes the request: slave id (2 bytes), 0x33, rid, then 4 value bytes (little endian)
+    if (payload.data[0] != (slave_id & 0xFF) ||
+        payload.data[1] != ((slave_id >> 8) & 0xFF) ||
+        payload.data[2] != 0x33 ||
+        payload.data[3] != static_cast<uint8_t>(rid))
+        return false;
+
+    raw = static_cast<uint32_t>(payload.data[4])
+        | (static_cast<uint32_t>(payload.data[5]) << 8)
+        | (static_cast<uint32_t>(payload.data[6]) << 16)
+        | (static_cast<uint32_t>(payload.data[7]) << 24);
+    return true;
+}
+
+} // namespace ulixarm

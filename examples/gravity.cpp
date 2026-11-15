@@ -44,7 +44,7 @@ int main()
     {
         // Keep robot control running
         robot.control(q, dq, tau, kp, kd, true);
-
+        
         char input;
         if (read(STDIN_FILENO, &input, 1) > 0)
         {
@@ -66,6 +66,30 @@ int main()
     }
 
     robot.hold();
+
+    while (true)
+    {
+        robot.refresh();
+        
+        std::system("clear");
+
+        std::cout << "========== ROBOT TEMPERATURES ==========\n";
+        std::cout << std::fixed << std::setprecision(2);
+
+        std::cout << " Joint |    Torque (Nm) |    TMOS (C) |    TROT (C)\n";
+        std::cout << "---------------------------------------\n";
+
+        for (int i = 0; i < 6; ++i) {
+            std::cout << std::setw(6) << i + 1
+                    << " | " << std::setw(11) << robot.get_tau()(i)
+                    << " | " << std::setw(11) << robot.get_tmos()(i)
+                    << " | " << std::setw(11) << robot.get_trot()(i)
+                    << '\n';
+        }
+
+        std::cout << "=======================================\n";
+    }
+    
 
     // Restore terminal settings
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);

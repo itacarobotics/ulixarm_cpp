@@ -711,11 +711,13 @@ void UlixArm::check_manipulator_joint_limits(const Joints& q_target, const Joint
         const int q_idx = this->joint_idx_q[i];
         const int v_idx = this->joint_idx_v[i];
 
-        // Check joint position limits, negated comparison so that NaN fails the check
+        // Check joint position limits (URDF limits widened by kJointPositionLimitMargin),
+        // negated comparison so that NaN fails the check
         const double q = q_target[i];
+        const double q_min = this->pin_model.lowerPositionLimit[q_idx] - kJointPositionLimitMargin;
+        const double q_max = this->pin_model.upperPositionLimit[q_idx] + kJointPositionLimitMargin;
 
-        if (!(q >= this->pin_model.lowerPositionLimit[q_idx] &&
-              q <= this->pin_model.upperPositionLimit[q_idx]))
+        if (!(q >= q_min && q <= q_max))
         {
             throw std::out_of_range(
                 "Joint '" + motor.get_joint_name() + "' position limit exceeded."

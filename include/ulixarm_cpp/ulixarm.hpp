@@ -21,6 +21,10 @@ namespace ulixarm
 
 constexpr std::size_t kNumJoints = 6;
 
+// Margin [rad] added on both sides of the URDF position limits of the manipulator joints.
+// A URDF range [lo, hi] is accepted as [lo - margin, hi + margin].
+constexpr double kJointPositionLimitMargin = 0.1;
+
 using Joints = Eigen::Matrix<double, kNumJoints, 1>;
 
 enum class Status

@@ -9,6 +9,9 @@
 #include <string>
 #include <utility>
 
+namespace ulixarm
+{
+
 class SerialPort
 {
 public:
@@ -16,7 +19,7 @@ public:
 
     ~SerialPort()
     {
-        this->release();
+        this->close();
     }
 
     // owns the port handle -> not copyable, only movable
@@ -32,7 +35,7 @@ public:
     {
         if (this != &other)
         {
-            this->release();
+            this->close();
             this->port_ = std::exchange(other.port_, nullptr);
             this->timeout_ms_ = other.timeout_ms_;
         }
@@ -127,9 +130,9 @@ public:
     /**
      * Reads one frame of len bytes starting with head and ending with tail.
      * 
-     * Bytes before the header are skipped. On a tail mismatch, the search 
-     * restarts from the next header byte inside the frame. Gives up after 
-     * max_scan_factor * len bytes so that a noisy line cannot block forever.
+     * Bytes before the header are skipped. Throws on a tail mismatch, or if no
+     * header is found within max_scan_factor * len bytes, so that a noisy line
+     * cannot block forever.
      */
     void read(uint8_t* data, uint8_t head, uint8_t tail, size_t len)
     {
@@ -145,22 +148,17 @@ public:
             throw std::invalid_argument("Read buffer cannot be null.");
 
         uint8_t byte;
-        size_t max_iterations = this->max_scan_factor * len;
-        size_t iteration = 0;
+        const size_t max_scanned = this->max_scan_factor * len;
+        size_t scanned = 0;
 
         // Read bytes until the header is found.
-        while(true)
+        do
         {
+            if (scanned++ == max_scanned)
+                throw std::runtime_error("Could not find head byte, aborting read.");
+
             this->wait_for_byte(&byte);
-
-            if (byte == head)
-                break;
-
-            if (iteration > max_iterations)
-                throw std::runtime_error("Could not find head byte, aborting read.");    
-
-            iteration++;
-        }
+        } while (byte != head);
 
         size_t bytes_read = 0;
         data[bytes_read] = head;
@@ -181,6 +179,21 @@ public:
             throw std::runtime_error(
                 "Invalid serial frame: unexpected tail byte."
             );
+        }
+    }
+
+    bool is_open() const { return this->port_ != nullptr; }
+
+    /**
+     * Closes the port. Safe to call when already closed.
+     */
+    void close()
+    {
+        if (this->port_ != nullptr)
+        {
+            sp_close(this->port_);
+            sp_free_port(this->port_);
+            this->port_ = nullptr;
         }
     }
 
@@ -252,18 +265,10 @@ private:
         }
     }
 
-    void release()
-    {
-        if (this->port_ != nullptr)
-        {
-            sp_close(this->port_);
-            sp_free_port(this->port_);
-            this->port_ = nullptr;
-        }
-    }
-
     static constexpr size_t max_scan_factor = 4;
 
     struct sp_port* port_ = nullptr;
     unsigned int timeout_ms_ = 0;
 };
+
+} // namespace ulixarm

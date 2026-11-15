@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Eigen3 3.4 NO_MODULE)
+find_dependency(pinocchio)
+find_dependency(PkgConfig)
+pkg_check_modules(LIBSERIALPORT REQUIRED IMPORTED_TARGET libserialport)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ulixarm_cppTargets.cmake")
+
+check_required_components(ulixarm_cpp)

@@ -1,11 +1,20 @@
 #pragma once
 
-#include <Eigen/Core>
-
+#include <Eigen/Dense>
+#include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
-#include <memory>
 #include <string>
+#include <vector>
+
+#include <pinocchio/multibody/model.hpp>
+#include <pinocchio/multibody/data.hpp>
+
+#include "motor.hpp"
+#include "protocol.hpp"
+#include "serial_port.hpp"
 
 namespace ulixarm
 {
@@ -13,6 +22,16 @@ namespace ulixarm
 constexpr std::size_t kNumJoints = 6;
 
 using Joints = Eigen::Matrix<double, kNumJoints, 1>;
+
+enum class Status
+{
+    IDLE = 0,
+    CONNECTED,
+    ENABLED,
+    DISABLED,
+    RUNNING,
+    ERROR
+};
 
 class UlixArm
 {
@@ -44,9 +63,6 @@ public:
      * arm does not fall; they keep executing the last command.
      */
     ~UlixArm();
-
-    UlixArm(const UlixArm&) = delete;
-    UlixArm& operator=(const UlixArm&) = delete;
 
     /**
      * @brief Opens the serial connection to the arm.
@@ -108,8 +124,8 @@ public:
      * needed to hold the arm up against gravity is added as well, so the
      * gains don't have to fight the arm's own weight. Before anything is sent,
      * the targets and gains are checked against the joint limits, joints with
-     * kp > 0 must be within 0.2 rad of their current position, and no motor
-     * may exceed 90 C (a warning is printed from 70 C).
+     * kp > 0 must be within max_q_step of their current position, and no motor
+     * may exceed max_motor_temperature.
      *
      * The success path does not allocate memory, so it can be called from a
      * realtime loop. Errors are reported with exceptions.
@@ -149,30 +165,44 @@ public:
      * @brief Gets the current joint positions.
      *
      * Returns the latest positions reported by the motors. These come from
-     * the last feedback received, from refresh() or control(). Throws if
-     * that feedback is older than 500 ms.
+     * the last feedback received. This can originate from calling refresh()
+     * or control().
      *
      * @return The joint angles, in radians.
      */
     Joints get_q() const;
 
     /**
-     * @brief Gets the current joint velocities, in rad/s. See get_q().
+     * @brief Gets the current joint velocities.
+     *
+     * Returns the latest velocities reported by the motors, from the last
+     * feedback received.
+     *
+     * @return The joint velocities, in rad/s.
      */
     Joints get_dq() const;
 
     /**
-     * @brief Gets the torque currently reported by each joint, in Nm. See get_q().
+     * @brief Gets the torque currently reported by each joint.
+     *
+     * Returns the latest torque values from the motor feedback, from the
+     * last feedback received.
+     *
+     * @return The joint torques, in Nm.
      */
     Joints get_tau() const;
 
     /**
-     * @brief Gets the MOSFET temperature of each motor driver, in degrees Celsius. See get_q().
+     * @brief Gets the MOSFET temperature of each motor driver.
+     *
+     * @return The MOSFET temperatures, in degrees Celsius.
      */
     Joints get_tmos() const;
 
     /**
-     * @brief Gets the rotor (motor winding) temperature of each joint, in degrees Celsius. See get_q().
+     * @brief Gets the rotor (motor winding) temperature of each joint.
+     *
+     * @return The rotor temperatures, in degrees Celsius.
      */
     Joints get_trot() const;
 
@@ -223,11 +253,294 @@ public:
      * @param e The exception to report.
      * @param level How deep in the chain we are, used for indentation. Leave it at 0 when calling it yourself.
      */
-    static void log_errors(const std::exception& e, int level = 0);
+    void log_errors(const std::exception& e, int level = 0);
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl;
+
+    /**
+     * @brief Finds the URDF file, following the lookup order of the constructor.
+     *
+     * @param urdf_path Path given by the user, or empty.
+     * @return Path of the URDF file to load.
+     */
+    std::string resolve_urdf_path(const std::string& urdf_path);
+
+    /**
+     * @brief Enables a given set of motors.
+     *
+     * Sends the enable command to every motor in the list.
+     *
+     * @param motors The motors to enable.
+     */
+    void enable_motors(const std::vector<Motor>& motors);
+
+    /**
+     * @brief Disables a given set of motors.
+     *
+     * Sends the disable command to every motor in the list.
+     *
+     * @param motors The motors to disable.
+     */
+    void disable_motors(const std::vector<Motor>& motors);
+
+    /**
+     * @brief Checks that the motors run in MIT mode with the expected PMAX/VMAX/TMAX.
+     *
+     * @param motors The motors to check.
+     */
+    void verify_motor_config(const std::vector<Motor>& motors);
+
+    /**
+     * @brief Reads a register of a motor.
+     *
+     * @param motor The motor to read from.
+     * @param rid The register to read.
+     * @return The raw 4 bytes of the register.
+     */
+    uint32_t read_register(const Motor& motor, MotorRegister rid);
+
+    /**
+     * @brief Reads a float register and throws if it differs from the expected value.
+     *
+     * @param motor The motor to read from.
+     * @param rid The register to read.
+     * @param name Name of the register, used in the error message.
+     * @param expected Expected value.
+     */
+    void check_register_value(const Motor& motor, MotorRegister rid, const std::string& name, double expected);
+
+    /**
+     * @brief Requests fresh feedback from a given set of motors.
+     *
+     * Sends a refresh request to every motor in the list, then reads
+     * the replies back.
+     *
+     * @param motors The motors to refresh.
+     */
+    void refresh_motors(std::vector<Motor>& motors);
+
+    /**
+     * @brief Sends n frames to the serial port in a single write.
+     *
+     * Drops stale input first, so that only the replies to these frames are read.
+     *
+     * @param frames The frames to send.
+     * @param n Number of frames.
+     */
+    void send_frames(const SendFrame* frames, std::size_t n);
+
+    /**
+     * @brief Reads the feedback of every motor in the list.
+     *
+     * Reads frames until every motor has replied, matching them by master id,
+     * skipping bridge status frames and frames from other motors.
+     *
+     * @param motors The motors that were just commanded.
+     */
+    void read_feedbacks(std::vector<Motor>& motors);
+
+    /**
+     * @brief Checks the feedback of a motor and stores its state.
+     *
+     * Throws on a motor fault, a wrong slave id, or a motor that reports
+     * disabled while the arm is enabled.
+     *
+     * @param motor The motor the feedback belongs to.
+     * @param payload The feedback payload.
+     */
+    void update_motor_state(Motor& motor, const Payload& payload);
+
+    /**
+     * @brief Computes the torque needed to cancel gravity.
+     *
+     * Uses the arm's dynamic model to work out how much torque each joint
+     * must produce to hold the arm still in the given configuration.
+     *
+     * @param q Joint positions, in radians.
+     * @return The gravity compensation torque for each joint, in N·m.
+     */
+    Joints compute_tau_gravity(const Joints& q);
+
+    /**
+     * @brief Checks that a command stays within the joint limits.
+     *
+     * Looks at the requested positions, velocities and torques to make sure
+     * they're within what the joints can safely handle. This guards against
+     * sending a command that could damage the arm.
+     *
+     * @param q_target Desired joint positions, in radians.
+     * @param dq_target Desired joint velocities, in rad/s.
+     * @param tau_target Desired joint torques, in N·m.
+     * @param kp Position (stiffness) gains.
+     * @param kd Velocity (damping) gains.
+     */
+    void check_manipulator_joint_limits(const Joints& q_target, const Joints& dq_target,
+        const Joints& tau_target, const Joints& kp, const Joints& kd) const;
+
+    /**
+     * @brief Checks that position targets are close to the current position.
+     *
+     * Rejects targets further than max_q_step from the measured position on
+     * joints with a non-zero stiffness, to avoid violent jumps. Large motions
+     * must be interpolated by the caller.
+     *
+     * @param q_target Desired joint positions, in radians.
+     * @param kp Position (stiffness) gains.
+     */
+    void check_position_step(const Joints& q_target, const Joints& kp) const;
+
+    /**
+     * @brief Checks that no motor is overheating.
+     *
+     * Prints a warning above warn_motor_temperature and throws above
+     * max_motor_temperature. Uses the temperatures from the last feedback received.
+     */
+    void check_motor_temperatures();
+
+    /**
+     * @brief Throws if the motor data is older than max_motors_update_age.
+     */
+    void check_motor_data_age() const;
+
+    /**
+     * @brief Throws if the arm is not connected and enabled.
+     */
+    void check_robot_enabled() const;
+
+    /**
+     * @brief Throws if no gripper is mounted.
+     */
+    void check_gripper_mounted() const;
+
+    /**
+     * @brief Checks that a command stays within the joint limits.
+     *
+     * @param d_target Desired opening of end effector, in meters.
+     */
+    void check_gripper_joint_limits(double d_target) const;
+
+    /**
+     * @brief Converts a gripper opening into a motor position.
+     *
+     * Inverse kinematics for the gripper: given how far open you want it,
+     * it works out the angle the gripper motor needs to reach.
+     *
+     * @param d Desired gripper opening in meters.
+     * @return The matching gripper motor position, in radians.
+     */
+    double gripper_ik(double d) const;
+
+    /**
+     * @brief Sends a control command to the gripper motor.
+     *
+     * @param q Position target, in rad.
+     * @param tau Feedforward torque, in Nm.
+     * @param kp Position (stiffness) gain.
+     * @param kd Velocity (damping) gain.
+     */
+    void control_gripper(double q, double tau, double kp, double kd);
+
+    /**
+     * @brief Whether a gripper is mounted on the arm.
+     *
+     * When false, the gripper functions and motors are ignored.
+     */
+    bool gripper;
+
+    /**
+     * @brief The arm's current state.
+     */
+    Status status;
+
+    /**
+     * @brief The motors driving the arm's joints.
+     */
+    std::vector<Motor> motors_manipulator;
+
+    /**
+     * @brief The motors driving the gripper.
+     *
+     * Only used when a gripper is mounted.
+     */
+    std::vector<Motor> motors_gripper;
+
+    /**
+     * @brief Handles the Damiao motor communication protocol.
+     */
+    DamiaoProtocol protocol;
+
+    /**
+     * @brief The serial port used to talk to the motors.
+     */
+    SerialPort port;
+
+    /**
+     * @brief The Pinocchio model of the arm, used for gravity compensation.
+     */
+    pinocchio::Model pin_model;
+
+    /**
+     * @brief Working data for the Pinocchio model.
+     */
+    pinocchio::Data pin_data;
+
+    /**
+     * @brief Full Pinocchio configuration, allocated once for the control loop.
+     */
+    Eigen::VectorXd pin_q;
+
+    /**
+     * @brief Position and velocity index of each manipulator joint in the Pinocchio model.
+     */
+    std::array<int, kNumJoints> joint_idx_q{};
+    std::array<int, kNumJoints> joint_idx_v{};
+
+    /**
+     * @brief Position index of the gripper joint in the Pinocchio model.
+     */
+    int gripper_idx_q{};
+
+    /**
+     * @brief Timestamp of the most recent motor data update.
+     */
+    std::chrono::steady_clock::time_point motors_update_timestamp;
+
+    /**
+     * @brief True once the temperature warning was printed, until all motors cool down.
+     */
+    bool temperature_warning_printed{false};
+
+    /**
+     * @brief Maximum allowed age of motor data.
+     */
+    const std::chrono::milliseconds max_motors_update_age{500};
+
+    /**
+     * @brief Maximum distance between a position target and the current position.
+     *
+     * Applies to joints commanded with kp > 0. In radians.
+     */
+    const double max_q_step{0.2};
+
+    /**
+     * @brief MOSFET and rotor temperature that throws an error, in degrees Celsius.
+     */
+    const int max_motor_temperature{90};
+
+    /**
+     * @brief MOSFET and rotor temperature that prints a warning, in degrees Celsius.
+     */
+    const int warn_motor_temperature{70};
+
+    /**
+     * @brief Maximum opening of the gripper, in meters.
+     */
+    const double max_gripper_opening{0.090};
+
+    /**
+     * @brief Bridge status frames and frames from other motors skipped while reading feedback.
+     */
+    const std::size_t max_skipped_frames{8};
 };
 
 } // namespace ulixarm

@@ -3,7 +3,6 @@
 include(CMakeFindDependencyMacro)
 
 find_dependency(Eigen3 3.4 NO_MODULE)
-# needed to link the static library
 find_dependency(pinocchio)
 find_dependency(PkgConfig)
 pkg_check_modules(LIBSERIALPORT REQUIRED IMPORTED_TARGET libserialport)

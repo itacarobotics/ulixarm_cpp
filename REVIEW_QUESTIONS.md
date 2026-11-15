@@ -208,7 +208,7 @@ limit means a control loop slower than 10 Hz fails on every call when gravity co
 
 Answer: Ok so keep hardcoded, so the user cannot edit them. Make 100 ms to 500 ms. And temperature throws a warning already at 70 C.
 
-**Status:** ✅ **Done.** Still hard-coded (now `constexpr` in `ulixarm.cpp`). Staleness 500 ms. A warning is printed once above 70 C (re-armed when all motors cool down); error stays at 90 C.
+**Status:** ✅ **Done.** Still hard-coded `const` members, so users cannot change them. Staleness 500 ms. A warning is printed once above 70 C (printed again after all motors cool down); error stays at 90 C.
 
 ---
 
@@ -219,7 +219,7 @@ Answer: Ok so keep hardcoded, so the user cannot edit them. Make 100 ms to 500 m
 
 Answer: fix
 
-**Status:** ✅ **Done.** `enable`/`disable` merged into one helper with the right message.
+**Status:** ✅ **Done.** Message fixed in `disable_motors()`.
 
 ### B2 🟠 `SerialPort::read()` doc doesn't match the code
 The doc (`serial_port.hpp:128-133`) says *"On a tail mismatch, the search restarts from the next header byte
@@ -289,7 +289,7 @@ Answer: yes
 
 Answer: ok
 
-**Status:** ✅ **Done.** Everything in `namespace ulixarm`; `constexpr std::size_t kNumJoints = 6`, `using Joints`; `enum class Status { Idle, Connected, Enabled, Disabled, Running, Error }` (CamelCase so an `ERROR` macro cannot clash). `Status` is now private to the `.cpp`.
+**Status:** ✅ **Done.** Everything in `namespace ulixarm`; `constexpr std::size_t kNumJoints = 6`, `using Joints`, `enum class Status`.
 
 ### D2 🔵 Include layout and install
 CMake exposes `include/ulixarm_cpp` as the include root, so users write `#include "ulixarm.hpp"` and
@@ -299,7 +299,7 @@ CMake exposes `include/ulixarm_cpp` as the include root, so users write `#includ
 
 Answer: yes
 
-**Status:** ✅ **Done.** Include root is `include/` (`#include <ulixarm_cpp/ulixarm.hpp>`); `motor.hpp`, `protocol.hpp`, `serial_port.hpp` moved to `src/` (private). `install()` + exported `ulixarm_cpp::ulixarm_core` + `ulixarm_cppConfig.cmake`, so `find_package(ulixarm_cpp)` works (tested).
+**Status:** ✅ **Done.** Include root is `include/` (`#include <ulixarm_cpp/ulixarm.hpp>`). `install()` + exported `ulixarm_cpp::ulixarm_core` + `ulixarm_cppConfig.cmake`, so `find_package(ulixarm_cpp)` works (tested).
 
 ### D3 🔵 The URDF path is baked in at compile time as an absolute source path
 `ULIXARM_DESCRIPTION_PATH="${CMAKE_CURRENT_SOURCE_DIR}/..."` breaks as soon as the library is installed,
@@ -317,7 +317,7 @@ a pImpl (or at least forward-declare and move includes into the `.cpp`)?
 
 Answer: Fix
 
-**Status:** ✅ **Done.** pImpl: the public header only includes `<Eigen/Core>`, `<memory>`, `<string>`, `<exception>`. Pinocchio and libserialport are now private link dependencies.
+**Status:** ↩️ **Reverted on request.** A pImpl was implemented, then dropped to keep the simple class layout of `main`. The header still includes only the Pinocchio model/data headers (algorithms, parser and collision headers moved to the `.cpp`), but Pinocchio and libserialport remain public dependencies.
 
 ### D5 🔵 Pass `Joints` by `const&`, and make getters `const`
 `control(Joints, Joints, ...)`, `check_*`, and `compute_tau_gravity` take 48-byte Eigen fixed-size vectors by value
@@ -371,7 +371,7 @@ What loop rate do you need?
 
 Answer: Use A.
 
-**Status:** ✅ **Done.** All frames of a group go out in one write, then the replies are read and matched by master id (`transact()`). Used by `control()`, `refresh()` and the gripper.
+**Status:** ✅ **Done.** All frames of a group go out in one write (`send_frames()`), then the replies are read and matched by master id (`read_feedbacks()`). Used by `control()`, `refresh()` and the gripper.
 
 ### P2 🔵 Byte-by-byte reads
 `wait_for_byte()` makes one `sp_blocking_read` syscall per byte (16 per frame, about 100 per cycle). Reading into a
@@ -388,7 +388,7 @@ OK to change?
 
 Answer: Ok.
 
-**Status:** ✅ **Done.** One flush per cycle (inside `transact()`).
+**Status:** ✅ **Done.** One flush per cycle (inside `send_frames()`).
 
 ---
 

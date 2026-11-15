@@ -13,7 +13,7 @@ Self-contained C++ API for the UlixArm (6 Damiao motors + gripper, over a Damiao
 ## Build and install
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone --recurse-submodules https://github.com/itacarobotics/ulixarm_cpp.git
 cd ulixarm_cpp
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -57,7 +57,7 @@ int main()
     }
     catch (const std::exception& e)
     {
-        ulixarm::UlixArm::log_errors(e);
+        arm.log_errors(e);
         return 1;
     }
 }

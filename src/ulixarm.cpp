@@ -498,9 +498,14 @@ void UlixArm::send_frames(const SendFrame* frames, std::size_t n)
     if (n == 0)
         return;
 
-    // drop stale frames, then send all frames in one write
+    // drop stale frames, then send the frames back to back without waiting for replies.
+    // One write per frame: a single write of n * 30 bytes is split into 64 byte USB
+    // packets, so frames straddle packet boundaries and the bridge drops them.
     this->port.flush_input();
-    this->port.write(frames[0].data, n * sizeof(SendFrame));
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        this->port.write(frames[i].data, sizeof(SendFrame));
+    }
 }
 
 

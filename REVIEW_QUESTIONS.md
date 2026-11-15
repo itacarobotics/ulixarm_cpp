@@ -371,7 +371,7 @@ What loop rate do you need?
 
 Answer: Use A.
 
-**Status:** ✅ **Done.** All frames of a group go out in one write (`send_frames()`), then the replies are read and matched by master id (`read_feedbacks()`). Used by `control()`, `refresh()` and the gripper.
+**Status:** ✅ **Done.** All frames of a group go out back to back, one write per frame (`send_frames()`; a single merged write made the bridge drop frames straddling 64 byte USB packets), then the replies are read and matched by master id (`read_feedbacks()`). Used by `control()`, `refresh()` and the gripper.
 
 ### P2 🔵 Byte-by-byte reads
 `wait_for_byte()` makes one `sp_blocking_read` syscall per byte (16 per frame, about 100 per cycle). Reading into a

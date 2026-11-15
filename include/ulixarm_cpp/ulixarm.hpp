@@ -320,9 +320,11 @@ private:
     void refresh_motors(std::vector<Motor>& motors);
 
     /**
-     * @brief Sends n frames to the serial port in a single write.
+     * @brief Sends n frames to the serial port, one write per frame, without waiting for replies.
      *
      * Drops stale input first, so that only the replies to these frames are read.
+     * Frames must not be merged into one write: the USB-CAN bridge drops frames
+     * that straddle a USB packet boundary.
      *
      * @param frames The frames to send.
      * @param n Number of frames.

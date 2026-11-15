@@ -12,7 +12,7 @@ struct SendFrame
     uint8_t data[30]{};
 };
 
-// frames are written back to back in a single write
+// frames are written to the port as raw bytes
 static_assert(sizeof(SendFrame) == 30, "SendFrame must not be padded");
 
 struct ReceiveFrame

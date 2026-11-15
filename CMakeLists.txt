@@ -85,3 +85,8 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/ulixarm_cppConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ulixarm_cpp
 )
+
+# Examples
+add_executable(examples_gravity examples/gravity.cpp)
+target_link_libraries(examples_gravity PRIVATE ulixarm_core)
+target_compile_options(examples_gravity PRIVATE -Wall -Wextra -Wpedantic -Werror)

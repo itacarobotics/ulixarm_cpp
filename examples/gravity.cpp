@@ -1,11 +1,7 @@
-// Gravity compensation with keyboard gripper control, then a stiff hold with a
-// torque/temperature monitor.
-//
-// Phase 1 (arm floats, can be moved by hand):
-//   o = open gripper, c = close gripper, q = hold the current pose and go to phase 2
-// Phase 2 (arm in a stiff hold, shows torques and temperatures):
-//   q = quit (the arm stays in the hold)
-// Ctrl+C at any time: hold the current pose and quit.
+// Gravity compensation: the arm floats and can be moved by hand.
+// The loop runs as fast as the bus allows and prints the control frequency
+// and joint positions once per second.
+// Ctrl+C: hold the current pose and quit.
 //
 // Usage: examples_gravity [port]   (default /dev/ttyACM0)
 
@@ -14,12 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <fcntl.h>
-#include <iomanip>
-#include <iostream>
-#include <termios.h>
-#include <thread>
-#include <unistd.h>
+#include <cstdio>
 
 using ulixarm::Joints;
 
@@ -27,42 +18,6 @@ namespace
 {
 std::atomic<bool> interrupted{false};
 void on_sigint(int) { interrupted = true; }
-
-// Puts stdin in non-blocking, single-character mode and restores it on destruction.
-class RawTerminal
-{
-public:
-    RawTerminal()
-    {
-        tcgetattr(STDIN_FILENO, &old_termios_);
-        termios raw = old_termios_;
-        raw.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-
-        old_flags_ = fcntl(STDIN_FILENO, F_GETFL, 0);
-        fcntl(STDIN_FILENO, F_SETFL, old_flags_ | O_NONBLOCK);
-    }
-
-    ~RawTerminal()
-    {
-        tcsetattr(STDIN_FILENO, TCSANOW, &old_termios_);
-        fcntl(STDIN_FILENO, F_SETFL, old_flags_);
-    }
-
-    RawTerminal(const RawTerminal&) = delete;
-    RawTerminal& operator=(const RawTerminal&) = delete;
-
-    // Returns the pressed key, or 0 if none.
-    char poll() const
-    {
-        char c = 0;
-        return read(STDIN_FILENO, &c, 1) > 0 ? c : 0;
-    }
-
-private:
-    termios old_termios_{};
-    int old_flags_ = 0;
-};
 }
 
 int main(int argc, char** argv)
@@ -82,61 +37,44 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const Joints kd = Joints::Constant(0.2);  // light damping so the arm does not drift
-    const auto period = std::chrono::milliseconds(2);  // 500 Hz
+    const Joints kp = Joints::Zero();
+    const Joints kd = Joints::Constant(0.0);  // light damping so the arm does not drift
 
-    RawTerminal terminal;
+    using Clock = std::chrono::steady_clock;
+    const auto print_period = std::chrono::seconds(1);
 
     try
     {
-        // Phase 1: gravity compensation, gripper on the keyboard
-        std::cout << "Gravity compensation active. o = open, c = close, q = hold." << std::endl;
-        auto next = std::chrono::steady_clock::now();
-        bool floating = true;
-        while (floating && !interrupted)
+        std::printf("Gravity compensation active. Ctrl+C to hold and quit.\n");
+
+        auto window_start = Clock::now();
+        long cycles = 0;
+
+        while (!interrupted)
         {
             // kp = 0: the motor ignores q_target, only gravity + damping act
-            arm.control(Joints::Zero(), Joints::Zero(), Joints::Zero(), Joints::Zero(), kd, /*gravity=*/true);
+            arm.control(Joints::Zero(), Joints::Zero(), Joints::Zero(), kp, kd, /*gravity=*/true);
+            ++cycles;
 
-            switch (terminal.poll())
+            const auto now = Clock::now();
+            const std::chrono::duration<double> elapsed = now - window_start;
+            if (elapsed >= print_period)
             {
-                case 'o': arm.open(); break;
-                case 'c': arm.close(0.4); break;
-                case 'q': floating = false; break;
-                default: break;
-            }
+                const double freq = cycles / elapsed.count();
+                const Joints q = arm.get_q();  // updated by control(), no refresh() needed
 
-            next += period;
-            std::this_thread::sleep_until(next);
+                std::printf("%7.1f Hz | q [rad]:", freq);
+                for (int i = 0; i < q.size(); ++i)
+                    std::printf(" %+6.3f", q(i));
+                std::printf("\n");
+
+                window_start = now;
+                cycles = 0;
+            }
         }
 
+        std::printf("\nCtrl+C received, holding the current pose.\n");
         arm.hold();
-
-        // Phase 2: stiff hold, show torques and temperatures
-        while (!interrupted && terminal.poll() != 'q')
-        {
-            arm.refresh();
-
-            std::cout << "\033[2J\033[H";  // clear screen
-            std::cout << "========== ROBOT STATE (holding, q = quit) ==========\n";
-            std::cout << std::fixed << std::setprecision(2);
-            std::cout << " Joint | Torque (Nm) |    TMOS (C) |    TROT (C)\n";
-            std::cout << "------------------------------------------------\n";
-
-            const Joints tau = arm.get_tau();
-            const Joints tmos = arm.get_tmos();
-            const Joints trot = arm.get_trot();
-            for (int i = 0; i < 6; ++i)
-            {
-                std::cout << std::setw(6) << i + 1
-                          << " | " << std::setw(11) << tau(i)
-                          << " | " << std::setw(11) << tmos(i)
-                          << " | " << std::setw(11) << trot(i) << '\n';
-            }
-            std::cout << "================================================" << std::endl;
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
     }
     catch (const std::exception& e)
     {

@@ -92,3 +92,7 @@ install(FILES
 add_executable(examples_gravity examples/gravity.cpp)
 target_link_libraries(examples_gravity PRIVATE ulixarm_core)
 target_compile_options(examples_gravity PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_executable(examples_gravity2 examples/gravity2.cpp)
+target_link_libraries(examples_gravity2 PRIVATE ulixarm_core)
+target_compile_options(examples_gravity2 PRIVATE -Wall -Wextra -Wpedantic -Werror)

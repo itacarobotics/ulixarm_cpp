@@ -59,10 +59,12 @@ install(TARGETS ulixarm_core
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# only the URDF is needed by the library (meshes are not loaded)
-install(DIRECTORY ${ULIXARM_DESCRIPTION_SOURCE_DIR}/urdf
-    DESTINATION ${ULIXARM_DESCRIPTION_INSTALL_DIR}
-    OPTIONAL
+# only the URDFs are needed by the library (meshes and xacro sources are not loaded)
+install(FILES
+    ${ULIXARM_DESCRIPTION_SOURCE_DIR}/urdf/arm.urdf
+    ${ULIXARM_DESCRIPTION_SOURCE_DIR}/urdf/arm_gripper.urdf
+    ${ULIXARM_DESCRIPTION_SOURCE_DIR}/urdf/arm_gripper_camera.urdf
+    DESTINATION ${ULIXARM_DESCRIPTION_INSTALL_DIR}/urdf
 )
 
 install(EXPORT ulixarm_cppTargets

@@ -25,7 +25,7 @@ int main(int argc, char** argv)
     const char* port = argc > 1 ? argv[1] : "/dev/ttyACM0";
     std::signal(SIGINT, on_sigint);
 
-    ulixarm::UlixArm arm(/*gripper=*/true);
+    ulixarm::UlixArm arm(/*gripper=*/true, /*camera=*/false);
     try
     {
         arm.connect(port);

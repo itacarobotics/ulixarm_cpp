@@ -49,16 +49,24 @@ public:
      * the gripper. It doesn't talk to the hardware yet; call connect()
      * for that.
      *
-     * The URDF is looked up in this order:
+     * The URDF file is picked from the mounted hardware:
+     * - arm.urdf                 (gripper = false, camera = false)
+     * - arm_gripper.urdf         (gripper = true,  camera = false)
+     * - arm_gripper_camera.urdf  (gripper = true,  camera = true)
+     *
+     * and looked up in this order:
      * 1. urdf_path, if not empty
-     * 2. $ULIXARM_DESCRIPTION_PATH/urdf/robot.urdf, if the environment variable is set
+     * 2. $ULIXARM_DESCRIPTION_PATH/urdf/<file>, if the environment variable is set
      * 3. the ulixarm_description installed with the library
      * 4. the ulixarm_description submodule of the source tree
      *
      * @param gripper Set to true if a gripper is mounted on the arm, false if not.
+     * @param camera Set to true if a camera is mounted on the gripper, false if not.
      * @param urdf_path Path to the robot URDF. Leave empty to use the lookup above.
+     * @throws std::invalid_argument if camera is true and gripper is false
+     *         (the camera is mounted on the gripper).
      */
-    explicit UlixArm(bool gripper = true, const std::string& urdf_path = "");
+    explicit UlixArm(bool gripper = true, bool camera = false, const std::string& urdf_path = "");
 
     /**
      * @brief Cleans up when the arm object goes away.
@@ -262,12 +270,22 @@ public:
 private:
 
     /**
+     * @brief Returns the URDF file name matching the mounted hardware.
+     *
+     * @param gripper Whether a gripper is mounted.
+     * @param camera Whether a camera is mounted (requires the gripper).
+     * @return arm.urdf, arm_gripper.urdf or arm_gripper_camera.urdf.
+     */
+    static std::string urdf_file_name(bool gripper, bool camera);
+
+    /**
      * @brief Finds the URDF file, following the lookup order of the constructor.
      *
      * @param urdf_path Path given by the user, or empty.
+     * @param urdf_file Name of the URDF file to look for in the description's urdf/ folder.
      * @return Path of the URDF file to load.
      */
-    std::string resolve_urdf_path(const std::string& urdf_path);
+    std::string resolve_urdf_path(const std::string& urdf_path, const std::string& urdf_file);
 
     /**
      * @brief Enables a given set of motors.

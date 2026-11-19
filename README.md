@@ -47,7 +47,7 @@ target_link_libraries(my_app PRIVATE ulixarm_cpp::ulixarm_core)
 
 int main()
 {
-    ulixarm::UlixArm arm(/*gripper=*/true);
+    ulixarm::UlixArm arm(/*gripper=*/true, /*camera=*/false);
 
     try
     {
@@ -122,11 +122,21 @@ Press Ctrl+C to hold the current pose and quit.
 
 ## URDF lookup
 
-The constructor loads `robot.urdf` from the first location that exists:
+The constructor picks the URDF matching the `gripper` and `camera` flags:
+
+| `gripper` | `camera` | URDF |
+|-----------|----------|------|
+| `false` | `false` | `arm.urdf` |
+| `true`  | `false` | `arm_gripper.urdf` |
+| `true`  | `true`  | `arm_gripper_camera.urdf` |
+
+`gripper=false, camera=true` throws `std::invalid_argument` (the camera is mounted on the gripper).
+
+The file is loaded from the first location that exists:
 
 1. the `urdf_path` constructor argument
-2. `$ULIXARM_DESCRIPTION_PATH/urdf/robot.urdf`
-3. `<install prefix>/share/ulixarm_cpp/ulixarm_description/urdf/robot.urdf`
+2. `$ULIXARM_DESCRIPTION_PATH/urdf/<file>`
+3. `<install prefix>/share/ulixarm_cpp/ulixarm_description/urdf/<file>`
 4. the `ulixarm_description` submodule in the source tree
 
 Bindings (e.g. pybind11) that ship their own copy of the URDF should pass `urdf_path`.

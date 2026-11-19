@@ -15,8 +15,14 @@
 namespace ulixarm
 {
 
-UlixArm::UlixArm(bool gripper, const std::string& urdf_path)
+UlixArm::UlixArm(bool gripper, bool camera, const std::string& urdf_path)
 {
+    // the camera is mounted on the gripper, so it cannot be there without it
+    if (camera && !gripper)
+    {
+        throw std::invalid_argument("Invalid configuration: camera requires the gripper to be mounted.");
+    }
+
     // save config
     this->gripper = gripper;
 
@@ -35,7 +41,7 @@ UlixArm::UlixArm(bool gripper, const std::string& urdf_path)
     this->motors_manipulator.emplace_back(0x06, 0x16, MotorLimitParam{.q = 12.5, .dq = 30.0, .tau = 10.0}, "joint6"); // DM4310
 
     // create pinocchio model and data
-    const std::string model_path = this->resolve_urdf_path(urdf_path);
+    const std::string model_path = this->resolve_urdf_path(urdf_path, urdf_file_name(gripper, camera));
 
     try
     {
@@ -91,7 +97,21 @@ UlixArm::~UlixArm()
 }
 
 
-std::string UlixArm::resolve_urdf_path(const std::string& urdf_path)
+std::string UlixArm::urdf_file_name(bool gripper, bool camera)
+{
+    if (gripper && camera)
+    {
+        return "arm_gripper_camera.urdf";
+    }
+    if (gripper)
+    {
+        return "arm_gripper.urdf";
+    }
+    return "arm.urdf";
+}
+
+
+std::string UlixArm::resolve_urdf_path(const std::string& urdf_path, const std::string& urdf_file)
 {
     if (!urdf_path.empty())
     {
@@ -100,23 +120,23 @@ std::string UlixArm::resolve_urdf_path(const std::string& urdf_path)
 
     if (const char* env = std::getenv("ULIXARM_DESCRIPTION_PATH"))
     {
-        return std::string(env) + "/urdf/robot.urdf";
+        return std::string(env) + "/urdf/" + urdf_file;
     }
 
-    const std::string installed = std::string(ULIXARM_INSTALL_DESCRIPTION_PATH) + "/urdf/robot.urdf";
+    const std::string installed = std::string(ULIXARM_INSTALL_DESCRIPTION_PATH) + "/urdf/" + urdf_file;
     if (std::filesystem::exists(installed))
     {
         return installed;
     }
 
-    const std::string source = std::string(ULIXARM_SOURCE_DESCRIPTION_PATH) + "/urdf/robot.urdf";
+    const std::string source = std::string(ULIXARM_SOURCE_DESCRIPTION_PATH) + "/urdf/" + urdf_file;
     if (std::filesystem::exists(source))
     {
         return source;
     }
 
     throw std::invalid_argument(
-        "Could not find robot.urdf. Pass urdf_path or set ULIXARM_DESCRIPTION_PATH."
+        "Could not find " + urdf_file + ". Pass urdf_path or set ULIXARM_DESCRIPTION_PATH."
     );
 }
 

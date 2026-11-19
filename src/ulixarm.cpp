@@ -144,7 +144,7 @@ void UlixArm::connect(const char* port)
         this->port.init(
             port,       // name of port
             static_cast <unsigned int>(921600), // baudrate [bit/s]
-            static_cast <unsigned int>(25)      // byte timeout [ms]
+            static_cast <unsigned int>(50)      // byte timeout [ms]
         );
     }
     catch(...)
